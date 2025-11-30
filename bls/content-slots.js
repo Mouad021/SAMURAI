@@ -7,19 +7,23 @@
   if (window.__calendria_dynslots_started) return;
   window.__calendria_dynslots_started = true;
 
-  const DEFAULT_AUTO_DELAY_MS = 5700;
-
-  let AUTO_DELAY_MS = DEFAULT_AUTO_DELAY_MS;
+  // ==========================
+  // DELAY من POPUP فقط
+  // ==========================
+  let AUTO_DELAY_MS = 0;
   try {
     const snap = window.__SAMURAI_STORAGE || {};
     const enabled = (snap.calendria_use_delays || "off") === "on";
-    const raw = snap.calendria_delay_slotselection || "";
-    if (enabled && raw !== "") {
+    const raw = snap.calendria_delay_slotselection;
+
+    if (enabled && raw !== undefined && raw !== null && String(raw).trim() !== "") {
       const n = parseFloat(String(raw).replace(",", "."));
       if (!isNaN(n) && n >= 0 && n <= 60) {
-        AUTO_DELAY_MS = n * 1000;
+        AUTO_DELAY_MS = n * 1000; // seconds → ms
       }
     }
+
+    console.log("[CALENDRIA][DynSlots] SlotSelection delay (ms):", AUTO_DELAY_MS);
   } catch (e) {
     console.warn("[CALENDRIA][DynSlots] cannot read SlotSelection delay from storage", e);
   }
@@ -139,11 +143,9 @@
   // Load external CSS (optional)
   // ==========================
   function injectCssFileOnce() {
-    // إذا كان الستايل ديالنا راه كاين، ما ندير والو
     if (document.getElementById("__cal_css_link")) return;
   
     try {
-      // نخدم فقط إذا كنخدم من داخل extension وعندنا chrome.runtime.getURL
       if (
         typeof chrome !== "undefined" &&
         chrome.runtime &&
@@ -155,7 +157,6 @@
         link.href = chrome.runtime.getURL("calendria.css");
         document.head.appendChild(link);
       }
-      // وإلا: ما ندير والو (الـ CSS راه جاي من insertCSS فـ background)
     } catch (e) {
       console.warn("[CALENDRIA][DynSlots] CSS inject skipped:", e);
     }
@@ -279,7 +280,7 @@
     if (!raw.startsWith("/")) raw = "/MAR/appointment/" + raw;
 
     const idx = raw.toLowerCase().indexOf("appointmentdate=");
-    if (idx !== -1) {
+       if (idx !== -1) {
       const after = raw.slice(idx + "appointmentdate=".length);
       return { prefix: raw.slice(0, idx + "appointmentdate=".length), suffix: after };
     }
@@ -581,7 +582,6 @@
 
       const res = await _fetch(input, init);
 
-      // 💜 too many request → Toast بنفسجي ناعم، يختفي وحدو
       if (res.status === 429 || res.status === 430) {
          showToast("too many request", "limit");
       }
@@ -814,32 +814,42 @@
   }
 
   // =======================================================
-  // COUNTDOWN
+  // COUNTDOWN (ميلي ثانية + جزء من الثانية)
   // =======================================================
-  function formatDelayLabel(ms) {
-    return `⏳ ${(ms / 1000).toFixed(1)}s`;
-  }
-
   function startInlineCountdownAlways(ms, onDone) {
     if (!__countdownBtn) {
       onDone();
       return;
     }
 
-    let leftMs = ms;
-    __countdownBtn.disabled = true;
-    __countdownBtn.textContent = formatDelayLabel(leftMs);
+    // إلا كان 0 أو أقل → نفذ مباشرة
+    if (ms <= 0) {
+      __countdownBtn.textContent = "0.000s";
+      __countdownBtn.disabled = true;
+      __countdownBtn.remove();
+      onDone();
+      return;
+    }
 
-    const t = setInterval(() => {
-      leftMs -= 100;
-      if (leftMs <= 0) {
-        clearInterval(t);
+    const start = performance.now();
+    const end = start + ms;
+
+    __countdownBtn.disabled = true;
+
+    function tick(now) {
+      const left = end - now;
+      if (left <= 0) {
+        __countdownBtn.textContent = "0.000s";
         __countdownBtn.remove();
         onDone();
         return;
       }
-      __countdownBtn.textContent = formatDelayLabel(leftMs);
-    }, 100);
+
+      __countdownBtn.textContent = (left / 1000).toFixed(3) + "s";
+      requestAnimationFrame(tick);
+    }
+
+    requestAnimationFrame(tick);
   }
 
   // =======================================================
@@ -880,31 +890,11 @@
     const bc = document.createElement("button");
     bc.type = "button";
     bc.className = "cal-countdown";
-    bc.textContent = formatDelayLabel(AUTO_DELAY_MS);
+    bc.textContent = (AUTO_DELAY_MS / 1000).toFixed(3) + "s";
     bc.disabled = false;
-    bc.title = "ثواني قبل الضغط التلقائي (إضغط لتغيير القيمة)";
+    bc.title = "Countdown before auto submit (from Delays tab)";
 
-    // تغيير قيمة العدّ التنازلي بالضغط على الفقاعة
-    bc.addEventListener("click", () => {
-      if (bc.disabled) return; // أثناء العدّ ما نسمحش بالتغيير
-
-      const currentSec = (AUTO_DELAY_MS / 1000).toFixed(1);
-      const input = prompt("كم ثانية قبل الضغط التلقائي؟", currentSec.replace(".", ","));
-      if (!input) return;
-
-      const parsed = parseFloat(input.replace(",", "."));
-      if (isNaN(parsed) || parsed < 0 || parsed > 60) {
-        alert("المرجو إدخال رقم بين 0 و 60 ثانية");
-        return;
-      }
-
-      AUTO_DELAY_MS = parsed * 1000;
-      try {
-        localStorage.setItem(DELAY_KEY, String(AUTO_DELAY_MS));
-      } catch {}
-      bc.textContent = formatDelayLabel(AUTO_DELAY_MS);
-    });
-
+    // مابقيناش نبدلو delay من هنا نهائياً
     __countdownBtn = bc;
 
     bar.appendChild(b1);
@@ -983,4 +973,3 @@
   boot();
 
 })();
-
