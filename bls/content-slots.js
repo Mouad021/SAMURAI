@@ -15,7 +15,6 @@
 
   function loadDelaySnapshot() {
     try {
-      // هاد الأوبجكت كيجي من الإضافة (popup / options)
       const snap = window.__SAMURAI_STORAGE || {};
       const enabled = (snap.calendria_use_delays || "off") === "on";
       const raw = snap.calendria_delay_slotselection;
@@ -48,7 +47,6 @@
   let __dateEl = null, __dateName = null;
   let __slotEl = null, __slotName = null;
 
-  let __countdownBtn = null;
   let __tpl = null;
   let __slotsAbort = null;
 
@@ -138,7 +136,6 @@
       const link = document.createElement("link");
       link.id = "__cal_css_link";
       link.rel = "stylesheet";
-      // CSS ديالك على الـ CDN
       link.href = "https://samurai-88i.pages.dev/bls/calendria.css";
       document.head.appendChild(link);
     } catch (e) {
@@ -673,7 +670,7 @@
   }
 
   // =======================================================
-  // POST SlotSelection (نفس منطق نسختك القديمة)
+  // POST SlotSelection
   // =======================================================
   async function postSlotSelection(fd, attempt = 1) {
     const txt = getAllScriptText();
@@ -790,44 +787,28 @@
   }
 
   // =======================================================
-  // COUNTDOWN (ثواني + جزء من الثانية)
+  // AUTO DELAY LOGIC (بدون أي زر ولا عداد)
   // =======================================================
-  function startInlineCountdownAlways(ms, onDone) {
-    if (!__countdownBtn) {
-      onDone();
-      return;
-    }
-
-    if (ms <= 0) {
-      __countdownBtn.textContent = "0.000s";
-      __countdownBtn.disabled = true;
-      __countdownBtn.remove();
-      onDone();
+  async function runAutoAfterDelay(ms, fn) {
+    if (typeof fn !== "function") return;
+    if (!ms || ms <= 0) {
+      await fn();
       return;
     }
 
     const start = performance.now();
-    const end = start + ms;
-
-    __countdownBtn.disabled = true;
-
-    function tick(now) {
-      const left = end - now;
-      if (left <= 0) {
-        __countdownBtn.textContent = "0.000s";
-        __countdownBtn.remove();
-        onDone();
-        return;
-      }
-      __countdownBtn.textContent = (left / 1000).toFixed(3) + "s";
-      requestAnimationFrame(tick);
+    while (true) {
+      const now = performance.now();
+      const elapsed = now - start;
+      const left = ms - elapsed;
+      if (left <= 0) break;
+      await sleep(Math.min(left, 10)); // خطوة صغيرة باش يكون أدق
     }
-
-    requestAnimationFrame(tick);
+    await fn();
   }
 
   // =======================================================
-  // BUTTONS
+  // BUTTONS (بدون cal-countdown نهائيا)
   // =======================================================
   function removeOriginalSubmit() {
     document.getElementById("btnSubmit")?.remove();
@@ -857,25 +838,8 @@
       else await submitOneHour();
     };
 
-    const bc = document.createElement("button");
-    bc.type = "button";
-    bc.className = "cal-countdown";
-
-    if (AUTO_ENABLED) {
-      bc.textContent = (AUTO_DELAY_MS / 1000).toFixed(3) + "s";
-      bc.disabled = false;
-      bc.title = "Countdown before auto submit (from DynSlots delay)";
-    } else {
-      bc.textContent = "AUTO OFF";
-      bc.disabled = true;
-      bc.title = "Auto submit disabled (Delays master OFF أو value فارغة)";
-    }
-
-    __countdownBtn = bc;
-
     bar.appendChild(b1);
     bar.appendChild(b2);
-    bar.appendChild(bc);
     form.appendChild(bar);
 
     return true;
@@ -938,9 +902,9 @@
       }
     }
 
-    // هنا الزر ديال AUTO كيرجع يخدم على ديلاي CALENDRIA
+    // أوطوماتيك جديد: بلا زر ولا عداد، غير delay حقيقي
     if (AUTO_ENABLED) {
-      startInlineCountdownAlways(AUTO_DELAY_MS, async () => {
+      runAutoAfterDelay(AUTO_DELAY_MS, async () => {
         if (SAMURAI_ALL_MODE) await postAllOpenSlotsAuto();
         else await submitOneHour();
       });
