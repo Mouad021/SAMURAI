@@ -12,16 +12,22 @@
   if (window.__calendria_applicant_info_started) return;
   window.__calendria_applicant_info_started = true;
 
+  const LAST_SELECTION_KEY = "calendria_last_slot_selection";
+
   function log(...a) {
-    console.log("%c[CALENDRIA][ApplicantInfo]", "color:#facc15;font-weight:bold;", ...a);
+    console.log(
+      "%c[CALENDRIA][ApplicantInfo]",
+      "color:#facc15;font-weight:bold;",
+      ...a
+    );
   }
   function warn(...a) {
     console.warn("[CALENDRIA][ApplicantInfo]", ...a);
   }
 
-  // ============================
-  // CSS inject (من ملف applicant.css داخل الإضافة)
-  // ============================
+  // =========================================
+  // CSS من الإضافة (applicant.css)
+  // =========================================
   function injectCssOnce() {
     if (document.getElementById("__cal_applicant_css")) return;
 
@@ -42,83 +48,91 @@
     }
   }
 
-  // ============================
-  // قراءة اليوم/الساعة + الميتاداتا من الإضافة
-  // ============================
-  function loadSelectionAndMeta(callback) {
+  // ----------------------------
+  // قراءة location / visasubtype / category من storage ديال الإضافة
+  // ----------------------------
+  function readPopupMeta(callback) {
     if (!chrome?.storage?.local) {
-      warn("chrome.storage.local not available, cannot read selection/meta");
-      callback(
-        { date: "", slot: "" },
-        { location: "", visasubtype: "", category: "" }
-      );
+      callback({
+        location: "",
+        visasubtype: "",
+        category: ""
+      });
       return;
     }
 
     chrome.storage.local.get(
       [
-        "calendria_last_slot_selection",
         "calendria_location_name",
         "calendria_visasub_name",
-        "calendria_category_name",
+        "calendria_category_name"
       ],
       (res = {}) => {
-        // ---- اليوم + الساعة ----
-        let date = "";
-        let slot = "";
-
-        const rawSel = res.calendria_last_slot_selection;
-        if (rawSel) {
-          try {
-            const obj =
-              typeof rawSel === "string" ? JSON.parse(rawSel) : rawSel;
-
-            if (obj && typeof obj === "object") {
-              date =
-                obj.date ||
-                obj.day ||
-                obj.dayText ||
-                obj.selectedDate ||
-                obj.dateText ||
-                "";
-              slot =
-                obj.slot ||
-                obj.time ||
-                obj.timeText ||
-                obj.selectedSlot ||
-                obj.slotText ||
-                "";
-            } else {
-              // إذا كانت القيمة مجرد سترينغ نخليها في DATE كاملة
-              date = String(rawSel);
-            }
-          } catch {
-            date = String(rawSel);
-          }
-        }
-
         const meta = {
           location:    (res.calendria_location_name || "").toString().trim(),
           visasubtype: (res.calendria_visasub_name  || "").toString().trim(),
-          category:    (res.calendria_category_name || "").toString().trim(),
+          category:    (res.calendria_category_name || "").toString().trim()
         };
-
-        log("loaded selection+meta from storage:", { date, slot, meta });
-        callback({ date, slot }, meta);
+        log("popup meta:", meta);
+        callback(meta);
       }
     );
   }
 
-  // ============================
-  // فين نحط البوكسات حسب الصفحة
-  // ============================
+  // ----------------------------
+  // قراءة اليوم و الساعة من localStorage (calendria_last_slot_selection)
+  // ----------------------------
+  function readLastSelection() {
+    try {
+      if (!window.localStorage) return null;
+      const raw = localStorage.getItem(LAST_SELECTION_KEY);
+      if (!raw) return null;
+
+      let data = null;
+      try {
+        data = JSON.parse(raw);
+      } catch (e) {
+        data = raw;
+      }
+
+      if (data && typeof data === "object") {
+        const date =
+          data.date ||
+          data.day ||
+          data.dayText ||
+          data.selectedDate ||
+          data.dateText ||
+          "";
+        const slot =
+          data.slot ||
+          data.time ||
+          data.timeText ||
+          data.selectedSlot ||
+          data.slotText ||
+          "";
+        return { date: String(date || ""), slot: String(slot || "") };
+      }
+
+      // مجرد سترينغ
+      return { date: String(data || ""), slot: "" };
+    } catch (e) {
+      warn("readLastSelection error", e);
+      return null;
+    }
+  }
+
+  // ----------------------------
+  // فين ندرج البوكسات فكل صفحة؟
+  // ----------------------------
   function findInsertPoint() {
     const p = location.pathname.toLowerCase();
 
+    // ApplicantSelection: تحت اللوغو
     if (p.includes("/mar/appointment/applicantselection")) {
       return document.querySelector("div.text-center.col-12") || null;
     }
 
+    // Liveness: تحت العنوان
     if (p.includes("/mar/appointment/liveness")) {
       const h5List = Array.from(document.querySelectorAll("h5"));
       const h5 = h5List.find((el) =>
@@ -130,6 +144,7 @@
       }
     }
 
+    // Payment: تحت العنوان
     if (p.includes("/mar/appointment/payment")) {
       const h5List = Array.from(document.querySelectorAll("h5"));
       const h5 = h5List.find((el) =>
@@ -144,9 +159,9 @@
     return null;
   }
 
-  // ============================
+  // ----------------------------
   // بناء البوكسات (صف أصفر + صف أخضر)
-  // ============================
+  // ----------------------------
   function buildInfoBoxes(sel, meta) {
     const wrap = document.createElement("div");
     wrap.className = "cal-app-info-wrap";
@@ -154,10 +169,11 @@
     const inner = document.createElement("div");
     inner.className = "cal-app-info-inner";
 
-    // ----- الصف العلوي (أصفر) DATE / SLOT -----
+    // ========== الصف العلوي (أصفر) DATE / SLOT ==========
     const rowTop = document.createElement("div");
     rowTop.className = "cal-app-row cal-app-row-main";
 
+    // DATE box
     const boxDate = document.createElement("div");
     boxDate.className = "cal-app-box";
     const lblDate = document.createElement("div");
@@ -169,6 +185,7 @@
     boxDate.appendChild(lblDate);
     boxDate.appendChild(valDate);
 
+    // SLOT box
     const boxSlot = document.createElement("div");
     boxSlot.className = "cal-app-box";
     const lblSlot = document.createElement("div");
@@ -183,7 +200,7 @@
     rowTop.appendChild(boxDate);
     rowTop.appendChild(boxSlot);
 
-    // ----- الصف السفلي (أخضر) LOCATION / VISASUBTYPE / CATEGORY -----
+    // ========== الصف السفلي (أخضر) LOCATION / VISA / CATEGORY ==========
     const rowBottom = document.createElement("div");
     rowBottom.className = "cal-app-row cal-app-row-sub";
 
@@ -219,8 +236,15 @@
     return wrap;
   }
 
-  function injectBoxes() {
-    if (document.getElementById("__cal_applicant_info")) return;
+  // ----------------------------
+  // إدراج البوكسات
+  // ----------------------------
+  function injectBoxesWithMeta() {
+    const sel = readLastSelection();
+    if (!sel) {
+      log("No last selection found in localStorage");
+      return;
+    }
 
     const anchor = findInsertPoint();
     if (!anchor || !anchor.parentElement) {
@@ -228,25 +252,20 @@
       return;
     }
 
-    loadSelectionAndMeta((sel, meta) => {
-      if (!sel.date && !sel.slot && !meta.location && !meta.visasubtype && !meta.category) {
-        log("no selection/meta to show yet");
-        return;
-      }
+    if (document.getElementById("__cal_applicant_info")) return;
 
+    readPopupMeta((meta) => {
       const boxes = buildInfoBoxes(sel, meta);
       boxes.id = "__cal_applicant_info";
 
       anchor.insertAdjacentElement("afterend", boxes);
-      log("Injected applicant info boxes");
+      log("Injected Applicant info boxes", { sel, meta });
     });
   }
 
-  // ============================
-  // PAYMENT: نفس المنطق القديم (VAS + MESSAGE)
-  // ============================
-  let __paymentPosted = false;
-
+  // ==========================================================
+  // PAYMENT (نفس المنطق القديم ديال VAS + MESSAGE)
+  // ==========================================================
   function collectFieldValue(name) {
     const el =
       document.querySelector(`[name="${name}"]`) ||
@@ -257,7 +276,8 @@
   function getVerificationToken() {
     return (
       collectFieldValue("__RequestVerificationToken") ||
-      (document.querySelector('input[name="__RequestVerificationToken"]')?.value || "")
+      (document.querySelector('input[name="__RequestVerificationToken"]')
+        ?.value || "")
     );
   }
 
@@ -269,7 +289,8 @@
     if (f && f.getAttribute("action")) {
       let act = f.getAttribute("action");
       if (!/^https?:/i.test(act)) {
-        if (!act.startsWith("/")) act = "/MAR/Appointment/" + act.replace(/^\.?\//, "");
+        if (!act.startsWith("/"))
+          act = "/MAR/Appointment/" + act.replace(/^\.?\//, "");
         return act;
       }
       return act;
@@ -340,21 +361,23 @@
     }, 6000);
   }
 
+  let __paymentPosted = false;
+
   async function autoSendPaymentVAS() {
     if (__paymentPosted) return;
     const p = location.pathname.toLowerCase();
     if (!p.includes("/mar/appointment/payment")) return;
 
-    const idVal   = collectFieldValue("Id");
-    const vasVal  = buildValueAddedServices();
+    const idVal = collectFieldValue("Id");
+    const vasVal = buildValueAddedServices();
     const dataVal = collectFieldValue("Data");
-    const token   = getVerificationToken();
+    const token = getVerificationToken();
 
     if (!idVal || !dataVal || !token) {
       warn("Payment VAS: some required fields missing", {
         idVal,
         dataVal,
-        tokenPresent: !!token
+        tokenPresent: !!token,
       });
       return;
     }
@@ -377,10 +400,11 @@
         credentials: "include",
         redirect: "manual",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-          "Accept": "application/json, text/plain, */*"
+          "Content-Type":
+            "application/x-www-form-urlencoded; charset=UTF-8",
+          Accept: "application/json, text/plain, */*",
         },
-        body: body.toString()
+        body: body.toString(),
       });
 
       let targetUrl = null;
@@ -390,7 +414,11 @@
         try {
           const json = await resp.json();
           log("Payment JSON response:", json);
-          if (json && typeof json.requestURL === "string" && json.requestURL) {
+          if (
+            json &&
+            typeof json.requestURL === "string" &&
+            json.requestURL
+          ) {
             targetUrl = json.requestURL;
           }
         } catch (e) {
@@ -413,7 +441,9 @@
         log("Payment: navigating to payment URL:", targetUrl);
         window.location.href = targetUrl;
       } else {
-        warn("Payment: no requestURL or Location in response, staying on page.");
+        warn(
+          "Payment: no requestURL or Location in response, staying on page."
+        );
         __paymentPosted = false;
       }
     } catch (e) {
@@ -422,20 +452,20 @@
     }
   }
 
-  // ============================
-  // boot
-  // ============================
+  // ==========================================================
+  // BOOT
+  // ==========================================================
   function boot() {
     injectCssOnce();
-    autoSendPaymentVAS();
 
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", () => {
-        injectBoxes();
-        if (!__paymentPosted) autoSendPaymentVAS();
+        injectBoxesWithMeta();
+        autoSendPaymentVAS();
       });
     } else {
-      injectBoxes();
+      injectBoxesWithMeta();
+      autoSendPaymentVAS();
     }
   }
 
