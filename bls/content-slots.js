@@ -7,20 +7,22 @@
   if (window.__calendria_dynslots_started) return;
   window.__calendria_dynslots_started = true;
 
-  // === Delay settings (قابلة للتعديل من العدّ التنازلي) ===
   const DEFAULT_AUTO_DELAY_MS = 5700;
-  const DELAY_KEY = "calendria_slot_delay_ms";
 
   let AUTO_DELAY_MS = DEFAULT_AUTO_DELAY_MS;
   try {
-    const raw = localStorage.getItem(DELAY_KEY);
-    if (raw) {
-      const n = parseFloat(raw);
-      if (!isNaN(n) && n >= 0 && n <= 60000) {
-        AUTO_DELAY_MS = n;
+    const snap = window.__SAMURAI_STORAGE || {};
+    const enabled = (snap.calendria_use_delays || "off") === "on";
+    const raw = snap.calendria_delay_slotselection || "";
+    if (enabled && raw !== "") {
+      const n = parseFloat(String(raw).replace(",", "."));
+      if (!isNaN(n) && n >= 0 && n <= 60) {
+        AUTO_DELAY_MS = n * 1000;
       }
     }
-  } catch {}
+  } catch (e) {
+    console.warn("[CALENDRIA][DynSlots] cannot read SlotSelection delay from storage", e);
+  }
 
   const MODE_KEY = "calendria_samurai_mode";
 
@@ -981,3 +983,4 @@
   boot();
 
 })();
+
