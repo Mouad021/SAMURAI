@@ -227,6 +227,7 @@ main .card-header h5 {
   gap: 8px;
 }
 
+/* الرسالة لا توجد Slots */
 .cal-no-slots-msg {
   font-weight: 600;
   color: #4b5563;
@@ -234,6 +235,11 @@ main .card-header h5 {
 
 /* Slot buttons */
 .cal-slot-btn {
+  /* باش يبانو ديما جوج فالسطر (أو أكثر) فالشاشة العريضة */
+  flex: 1 1 calc(50% - 8px);
+  max-width: calc(50% - 8px);
+  box-sizing: border-box;
+
   min-width: 150px;
   height: 50px;
   border-radius: 16px;
@@ -259,6 +265,14 @@ main .card-header h5 {
   transform: translateY(-1px);
   border-color: #38bdf8;
   box-shadow: 0 4px 14px rgba(148, 163, 184, 0.65);
+}
+
+/* على الشاشات الصغيرة خليه بوكس واحد فالسطر */
+@media (max-width: 480px) {
+  .cal-slot-btn {
+    flex-basis: 100%;
+    max-width: 100%;
+  }
 }
 
 /* Count > 1 – أخضر ناعم */
@@ -345,7 +359,7 @@ main .card-header h5 {
   background: #e5e7eb;
   color: #111827;
   border-color: rgba(148, 163, 184, 0.6);
-  cursor: default;
+  cursor: pointer;
   opacity: .95;
 }
 
@@ -406,11 +420,13 @@ main .card-header h5 {
   border-color: #ef4444;
   color: #7f1d1d;
 }
+
 .cal-toast-limit {
   background: #f5f3ff;
   border-color: #a855f7;
   color: #4c1d95;
 }
+
 /* أنيميشن خروج */
 .cal-toast-hide {
   animation: cal-toast-out 0.16s ease-in forwards;
