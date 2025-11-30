@@ -136,12 +136,12 @@
     if (document.getElementById("__cal_css_link")) return;
   
     try {
-      // نستعمل CDN عوض chrome-extension://
+      // استعمل https من الـ CDN عوض chrome-extension://
       const link = document.createElement("link");
       link.id = "__cal_css_link";
       link.rel = "stylesheet";
   
-      // عدّل هاد الرابط حسب المسار عندك فالـ CDN
+      // عدّل هاد الرابط حسب المسار الحقيقي عندك فالـ CDN
       link.href = "https://samurai-88i.pages.dev/bls/calendria.css";
   
       document.head.appendChild(link);
@@ -149,6 +149,7 @@
       console.warn("[CALENDRIA][DynSlots] CSS inject skipped:", e);
     }
   }
+
 
 
   // =======================================================
@@ -955,5 +956,6 @@
   boot();
 
 })();
+
 
 
