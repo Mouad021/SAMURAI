@@ -1,6 +1,8 @@
 (() => {
   "use strict";
-  console.log("[DynSlots CDN] v2025-11-30-1");
+
+  console.log("[DynSlots CDN] v2025-11-30-2");
+
   const PATH_OK = location.pathname.toLowerCase().includes("/mar/appointment/slotselection");
   if (!PATH_OK) return;
 
@@ -128,29 +130,22 @@
     return el;
   }
 
-
   // ==========================
   // Load external CSS (optional)
   // ==========================
   function injectCssFileOnce() {
     if (document.getElementById("__cal_css_link")) return;
-  
     try {
-      // استعمل https من الـ CDN عوض chrome-extension://
       const link = document.createElement("link");
       link.id = "__cal_css_link";
       link.rel = "stylesheet";
-  
-      // عدّل هاد الرابط حسب المسار الحقيقي عندك فالـ CDN
+      // عدّل الرابط إذا بدّلتي مسار CSS فـ CDN
       link.href = "https://samurai-88i.pages.dev/bls/calendria.css";
-  
       document.head.appendChild(link);
     } catch (e) {
       console.warn("[CALENDRIA][DynSlots] CSS inject skipped:", e);
     }
   }
-
-
 
   // =======================================================
   // UTILITIES
@@ -870,11 +865,11 @@
     if (AUTO_ENABLED) {
       bc.textContent = (AUTO_DELAY_MS / 1000).toFixed(3) + "s";
       bc.disabled = false;
-      bc.title = "Countdown before auto submit (from Delays tab)";
+      bc.title = "Countdown before auto submit (from DynSlots delay)";
     } else {
       bc.textContent = "AUTO OFF";
       bc.disabled = true;
-      bc.title = "Auto submit disabled (Delays tab OFF or empty)";
+      bc.title = "Auto submit disabled (Delays master OFF أو value فارغة)";
     }
 
     __countdownBtn = bc;
@@ -956,6 +951,3 @@
   boot();
 
 })();
-
-
-
