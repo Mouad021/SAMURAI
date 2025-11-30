@@ -7,7 +7,21 @@
   if (window.__calendria_dynslots_started) return;
   window.__calendria_dynslots_started = true;
 
-  const AUTO_DELAY_MS = 5700;
+  // === Delay settings (قابلة للتعديل من العدّ التنازلي) ===
+  const DEFAULT_AUTO_DELAY_MS = 5700;
+  const DELAY_KEY = "calendria_slot_delay_ms";
+
+  let AUTO_DELAY_MS = DEFAULT_AUTO_DELAY_MS;
+  try {
+    const raw = localStorage.getItem(DELAY_KEY);
+    if (raw) {
+      const n = parseFloat(raw);
+      if (!isNaN(n) && n >= 0 && n <= 60000) {
+        AUTO_DELAY_MS = n;
+      }
+    }
+  } catch {}
+
   const MODE_KEY = "calendria_samurai_mode";
 
   const log  = (...a) => console.log("%c[CALENDRIA][DynSlots]", "color:#0ff;font-weight:bold;", ...a);
@@ -86,7 +100,7 @@
   }
 
   /**
-   * type: "info" | "pending" | "success" | "reserved"
+   * type: "info" | "pending" | "success" | "reserved" | "limit"
    * options: { durationMs?: number, persistent?: boolean }
    */
   function showToast(message, type = "info", options = {}) {
@@ -103,7 +117,6 @@
     } else if (type === "reserved") {
         el.classList.add("cal-toast-reserved");
     } else if (type === "limit") {
-        // too many request → بنفسجي
         el.classList.add("cal-toast-limit");
     } else {
         el.classList.add("cal-toast-info");
@@ -568,9 +581,8 @@
 
       // 💜 too many request → Toast بنفسجي ناعم، يختفي وحدو
       if (res.status === 429 || res.status === 430) {
-         showToast("too many request", "limit"); // ما فيهاش persistent → مايبقاش عالق
+         showToast("too many request", "limit");
       }
-
 
       try {
         if (isGetSlots) {
@@ -802,20 +814,29 @@
   // =======================================================
   // COUNTDOWN
   // =======================================================
+  function formatDelayLabel(ms) {
+    return `⏳ ${(ms / 1000).toFixed(1)}s`;
+  }
+
   function startInlineCountdownAlways(ms, onDone) {
-    if (!__countdownBtn) return onDone();
+    if (!__countdownBtn) {
+      onDone();
+      return;
+    }
 
     let leftMs = ms;
-    __countdownBtn.textContent = `⏳ ${Math.ceil(leftMs/1000)}s`;
+    __countdownBtn.disabled = true;
+    __countdownBtn.textContent = formatDelayLabel(leftMs);
 
     const t = setInterval(() => {
       leftMs -= 100;
-      __countdownBtn.textContent = `⏳ ${Math.ceil(leftMs/1000)}s`;
       if (leftMs <= 0) {
         clearInterval(t);
         __countdownBtn.remove();
         onDone();
+        return;
       }
+      __countdownBtn.textContent = formatDelayLabel(leftMs);
     }, 100);
   }
 
@@ -857,8 +878,30 @@
     const bc = document.createElement("button");
     bc.type = "button";
     bc.className = "cal-countdown";
-    bc.textContent = `⏳ ${Math.ceil(AUTO_DELAY_MS/1000)}s`;
-    bc.disabled = true;
+    bc.textContent = formatDelayLabel(AUTO_DELAY_MS);
+    bc.disabled = false;
+    bc.title = "ثواني قبل الضغط التلقائي (إضغط لتغيير القيمة)";
+
+    // تغيير قيمة العدّ التنازلي بالضغط على الفقاعة
+    bc.addEventListener("click", () => {
+      if (bc.disabled) return; // أثناء العدّ ما نسمحش بالتغيير
+
+      const currentSec = (AUTO_DELAY_MS / 1000).toFixed(1);
+      const input = prompt("كم ثانية قبل الضغط التلقائي؟", currentSec.replace(".", ","));
+      if (!input) return;
+
+      const parsed = parseFloat(input.replace(",", "."));
+      if (isNaN(parsed) || parsed < 0 || parsed > 60) {
+        alert("المرجو إدخال رقم بين 0 و 60 ثانية");
+        return;
+      }
+
+      AUTO_DELAY_MS = parsed * 1000;
+      try {
+        localStorage.setItem(DELAY_KEY, String(AUTO_DELAY_MS));
+      } catch {}
+      bc.textContent = formatDelayLabel(AUTO_DELAY_MS);
+    });
 
     __countdownBtn = bc;
 
@@ -938,4 +981,3 @@
   boot();
 
 })();
-
