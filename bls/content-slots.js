@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-
+  console.log("[DynSlots CDN] v2025-11-30-1");
   const PATH_OK = location.pathname.toLowerCase().includes("/mar/appointment/slotselection");
   if (!PATH_OK) return;
 
@@ -952,3 +952,4 @@
   boot();
 
 })();
+
