@@ -57,6 +57,16 @@
     return { locationData, visaIdData, visasubIdData, categoryData };
   }
 
+  // applicantsNoData (Number Of Members) من الصفحة
+  function getApplicantsNoData() {
+    let arr = safeArray(window.applicantsNoData);
+    if (!arr.length) {
+      arr = extractArrayFromScripts("applicantsNoData");
+    }
+    log("[VT] applicantsNoData length:", arr.length);
+    return arr;
+  }
+
   // ---------- 2) قراءة اختيارات الـ popup ----------
   function loadPopupChoices() {
     return new Promise((resolve) => {
@@ -83,6 +93,32 @@
           resolve(choices);
         }
       );
+    });
+  }
+
+  // ---------- 2.5) قراءة اختيار Number Of Members من الإضافة / الصفحة ----------
+  function loadMembersCount() {
+    return new Promise((resolve) => {
+      if (!chrome?.storage?.local) {
+        // fallback: من سكربت الصفحة
+        let n = 0;
+        if (typeof window.numberofapplicants !== "undefined") {
+          n = parseInt(window.numberofapplicants, 10);
+        }
+        resolve(n);
+        return;
+      }
+      chrome.storage.local.get(["calendria_members_count"], (res = {}) => {
+        let n = parseInt(res.calendria_members_count, 10);
+        if (!isFinite(n) || n <= 0) {
+          if (typeof window.numberofapplicants !== "undefined") {
+            n = parseInt(window.numberofapplicants, 10);
+          }
+        }
+        if (!isFinite(n) || n <= 0) n = 0;
+        log("[VT] membersCount from storage/page:", n);
+        resolve(n);
+      });
     });
   }
 
@@ -157,15 +193,45 @@
 
       if (!labelId) return;
 
-      if (labelText.includes("Category"))       categoryId   = labelId;
-      else if (labelText.includes("Location"))  locationId   = labelId;
-      else if (labelText.includes("Visa Type")) visaTypeId   = labelId;
+      if (labelText.includes("Category"))           categoryId   = labelId;
+      else if (labelText.includes("Location"))      locationId   = labelId;
+      else if (labelText.includes("Visa Type"))     visaTypeId   = labelId;
       else if (labelText.includes("Visa Sub Type")) visaSubTypeId = labelId;
     });
 
     const res = { locationId, visaTypeId, visaSubTypeId, categoryId };
     log("visible field inputs (runVisaTypeFilling style):", res);
     return res;
+  }
+
+  // نفس الطريقة لكن لـ Number Of Members
+  function findMembersFieldInput(form) {
+    const elements = form.querySelectorAll(".mb-3");
+    let membersId = null;
+
+    elements.forEach((node) => {
+      const cs = window.getComputedStyle(node);
+      if (cs.display === "none") return;
+
+      const label  = node.querySelector("label");
+      const select = node.querySelector("span.k-select");
+      if (!label || !select) return;
+
+      const labelText = (label.textContent || "").trim();
+      const labelId   = label.getAttribute("for");
+      if (!labelId) return;
+
+      if (labelText.toLowerCase().includes("number of members")) {
+        membersId = labelId;
+      }
+    });
+
+    if (membersId) {
+      log("[VT] found Number Of Members field id:", membersId);
+    } else {
+      log("[VT] Number Of Members field not found (maybe hidden?)");
+    }
+    return membersId;
   }
 
   // ---------- 5) حقن قيمة في dropdown / input ----------
@@ -198,6 +264,45 @@
       injectedValue: String(value),
       kendo: usedKendo,
     });
+  }
+
+  // ---------- 5.5) حقن Number Of Members ----------
+  async function applyMembersField(form) {
+    const membersCount = await loadMembersCount();
+    if (!membersCount || membersCount < 2) {
+      log("[VT] membersCount < 2 → skipping members injection");
+      return;
+    }
+
+    const applicants = getApplicantsNoData();
+    if (!applicants.length) {
+      warn("[VT] applicantsNoData empty → cannot map members");
+      return;
+    }
+
+    const label = membersCount + " Members";
+    const item = applicants.find(
+      (x) => String(x.Name || "").toLowerCase() === label.toLowerCase()
+    );
+    if (!item) {
+      warn("[VT] no applicantsNoData match for", label);
+      return;
+    }
+
+    const value = item.Id || item.Value;
+    if (!value) {
+      warn("[VT] applicantsNoData match has no Id/Value:", item);
+      return;
+    }
+
+    const membersId = findMembersFieldInput(form);
+    if (!membersId) {
+      warn("[VT] members field input not found, maybe not visible");
+      return;
+    }
+
+    forceValueIntoField(membersId, value);
+    log("[VT] members injected:", { membersId, value });
   }
 
   // ---------- 6) delay ----------
@@ -316,6 +421,46 @@
     return obj;
   }
 
+  // قراءة القيمة من الـ DOM فقط (بدون مخزن)
+  function readAppointmentForFromDom(form) {
+    const hidden = form.querySelector('[name="AppointmentFor"]');
+    if (hidden && hidden.value) {
+      return String(hidden.value).trim();
+    }
+
+    const familyChecked = form.querySelector('input[type="radio"][id^="family"]:checked');
+    const selfChecked   = form.querySelector('input[type="radio"][id^="self"]:checked');
+
+    if (familyChecked) return "Family";
+    if (selfChecked)   return "Individual";
+
+    return "";
+  }
+
+  // نفضّل قيمة المخزن calendria_appointment_for إن وُجدت
+  function getAppointmentForValue(form) {
+    return new Promise((resolve) => {
+      if (!chrome?.storage?.local) {
+        resolve(readAppointmentForFromDom(form));
+        return;
+      }
+
+      chrome.storage.local.get(["calendria_appointment_for"], (res = {}) => {
+        const raw = (res.calendria_appointment_for || "").toString().trim().toLowerCase();
+
+        if (raw === "family") {
+          resolve("Family");
+        } else if (raw === "individual") {
+          resolve("Individual");
+        } else {
+          // fallback: ما اختارش فالإضافة → ناخدو من الصفحة
+          resolve(readAppointmentForFromDom(form));
+        }
+      });
+    });
+  }
+
+
   // ---------- 9) بناء البايلود و الإرسال بـ fetch ----------
   async function buildPayloadAndSend(form) {
     if (window.__cal_vt_sent) {
@@ -324,7 +469,6 @@
     }
     window.__cal_vt_sent = true;
 
-    // ResponseData من السكريبت الأصلي
     const respObj = buildResponseDataObject(form);
     const respInput = form.querySelector('[name="ResponseData"]');
     if (respInput) {
@@ -345,7 +489,9 @@
 
     fd.set("Data", dataVal);
     fd.set("DataSource", dsVal);
-    fd.set("AppointmentFor", "");
+    const apptForVal = await getAppointmentForValue(form);
+    fd.set("AppointmentFor", apptForVal);
+    fd.set("AppointmentFor", apptForVal);
     fd.set("ReCaptchaToken", recVal);
     fd.set("__RequestVerificationToken", tokenVal);
     fd.set("ResponseData", JSON.stringify(respObj));
@@ -374,19 +520,16 @@
       try {
         log("[VT] sending custom POST to", url);
 
-        // 1️⃣ أولاً: نرسل طلب VisaType
         const resp = await fetch(url, {
           method: "POST",
           headers,
           body: params.toString(),
           credentials: "include",
-          redirect: "manual"   // ماغاديش نستعمل resp.url
+          redirect: "manual"
         });
 
         log("[VT] custom POST status:", resp.status);
 
-        // 2️⃣ من بعد ما كيسالي POST → نبني طلب SlotSelection ديالنا
-        // نحاول ناخد التوكن من Data، وإذا كانت فارغة ناخدها من URL
         const qs = new URLSearchParams(window.location.search || "");
         const dataFromUrl = qs.get("data") || "";
         const slotData = dataVal || dataFromUrl;
@@ -396,7 +539,6 @@
           return;
         }
 
-        // loc من storage، بحروف كبار
         if (chrome?.storage?.local) {
           chrome.storage.local.get(["calendria_location_name"], (res = {}) => {
             const rawLoc  = (res.calendria_location_name || "").toString().trim();
@@ -408,7 +550,6 @@
               (locUpper ? "&loc=" + encodeURIComponent(locUpper) : "");
 
             log("[VT] redirect to SlotSelection →", slotUrl);
-            // 3️⃣ هنا نخلي المتصفح يرسل طلب SlotSelection ويتبع الـ redirect بوحدو
             location.href = slotUrl;
           });
         } else {
@@ -462,6 +603,9 @@
     if (fields.visaTypeId)     forceValueIntoField(fields.visaTypeId,   ids.visaTypeId);
     if (fields.visaSubTypeId)  forceValueIntoField(fields.visaSubTypeId,ids.visaSubTypeId);
     if (fields.categoryId)     forceValueIntoField(fields.categoryId,   ids.categoryId);
+
+    // هنا نطبق نفس المنطق على Number Of Members
+    await applyMembersField(form);
 
     await buildPayloadAndSend(form);
     log("[VT] fields filled + payload built, custom POST scheduled.");
