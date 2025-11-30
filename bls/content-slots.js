@@ -7,34 +7,6 @@
   if (window.__calendria_dynslots_started) return;
   window.__calendria_dynslots_started = true;
 
-  // ==========================
-  // DELAY من POPUP (DynSlots) + master من Delays
-  // ==========================
-  let AUTO_DELAY_MS = 0;
-  let AUTO_ENABLED  = false;
-
-  function loadDelaySnapshot() {
-    try {
-      const snap = window.__SAMURAI_STORAGE || {};
-      const enabled = (snap.calendria_use_delays || "off") === "on";
-      const raw = snap.calendria_delay_slotselection;
-
-      if (enabled && raw !== undefined && raw !== null && String(raw).trim() !== "") {
-        const n = parseFloat(String(raw).replace(",", "."));
-        if (!isNaN(n) && n >= 0) {
-          AUTO_DELAY_MS = n * 1000; // seconds → ms
-          AUTO_ENABLED  = true;
-        }
-      }
-
-      console.log("[CALENDRIA][DynSlots] SlotSelection delay (ms):", AUTO_DELAY_MS, "enabled:", AUTO_ENABLED);
-    } catch (e) {
-      console.warn("[CALENDRIA][DynSlots] cannot read SlotSelection delay from storage", e);
-    }
-  }
-
-  loadDelaySnapshot();
-
   const MODE_KEY = "calendria_samurai_mode";
 
   const log  = (...a) => console.log("%c[CALENDRIA][DynSlots]", "color:#0ff;font-weight:bold;", ...a);
@@ -787,28 +759,7 @@
   }
 
   // =======================================================
-  // AUTO DELAY LOGIC (بدون أي زر ولا عداد)
-  // =======================================================
-  async function runAutoAfterDelay(ms, fn) {
-    if (typeof fn !== "function") return;
-    if (!ms || ms <= 0) {
-      await fn();
-      return;
-    }
-
-    const start = performance.now();
-    while (true) {
-      const now = performance.now();
-      const elapsed = now - start;
-      const left = ms - elapsed;
-      if (left <= 0) break;
-      await sleep(Math.min(left, 10)); // خطوة صغيرة باش يكون أدق
-    }
-    await fn();
-  }
-
-  // =======================================================
-  // BUTTONS (بدون cal-countdown نهائيا)
+  // BUTTONS (بلا countdown نهائيا)
   // =======================================================
   function removeOriginalSubmit() {
     document.getElementById("btnSubmit")?.remove();
@@ -900,14 +851,6 @@
       if (btn && trigger && popup) {
         await selectDay(randomDay.DateText, btn, trigger, popup);
       }
-    }
-
-    // أوطوماتيك جديد: بلا زر ولا عداد، غير delay حقيقي
-    if (AUTO_ENABLED) {
-      runAutoAfterDelay(AUTO_DELAY_MS, async () => {
-        if (SAMURAI_ALL_MODE) await postAllOpenSlotsAuto();
-        else await submitOneHour();
-      });
     }
   }
 
