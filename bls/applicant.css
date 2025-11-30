@@ -1,0 +1,92 @@
+/* applicant.css */
+/* ============================
+   CALENDRIA – ApplicantSelection info (DATE / SLOT + META)
+   ============================ */
+
+.cal-app-info-wrap {
+  margin-top: 8px;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: center;
+}
+
+.cal-app-info-inner {
+  display: flex;
+  flex-direction: column;   /* صف فوق + صف تحت */
+  gap: 8px;
+  max-width: 520px;
+}
+
+/* صف عام */
+.cal-app-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* الصف العلوي: مربعين كبار أصفرين */
+.cal-app-row-main .cal-app-box {
+  flex: 1 1 160px;
+  min-width: 140px;
+}
+
+/* الصف السفلي: ثلاث مربعات صغار خضر */
+.cal-app-row-sub .cal-app-box {
+  flex: 1 1 0;
+  min-width: 110px;
+}
+
+/* البوكس الأصفر (DATE / SLOT) */
+.cal-app-box {
+  background: #fff6cc;              /* أصفر فاتح */
+  border-radius: 10px;              /* حواف دائرية */
+  border: 1px solid #facc15;        /* أصفر أغمق شوية */
+  padding: 8px 10px;
+  box-shadow: 0 4px 10px rgba(250, 204, 21, 0.35);
+}
+
+/* عنوان داخل البوكس (DATE / SLOT) */
+.cal-app-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #92400e;
+  margin-bottom: 4px;
+}
+
+/* القيمة (اليوم / الساعة) */
+.cal-app-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #78350f;
+  word-break: break-word;
+}
+
+/* ============================
+   البوكسات الخضراء (location / visasubtype / category)
+   ============================ */
+
+.cal-app-box-green {
+  background: #dcfce7;              /* أخضر فاتح */
+  border-color: #22c55e;
+  box-shadow: 0 3px 8px rgba(34, 197, 94, 0.25);
+}
+
+/* مربعات أصغر شوية */
+.cal-app-box-small {
+  padding: 6px 8px;
+}
+
+/* عنوان و قيمة داخل الأخضر */
+.cal-app-box-green .cal-app-label {
+  color: #14532d;
+  text-transform: none;             /* نخليها صغيرة باش تبان "location :" */
+  letter-spacing: 0.03em;
+  font-size: 11px;
+}
+
+.cal-app-box-green .cal-app-value {
+  color: #166534;
+  font-size: 13px;
+}
