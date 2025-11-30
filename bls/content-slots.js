@@ -128,25 +128,28 @@
     return el;
   }
 
+
   // ==========================
-  // CSS
+  // Load external CSS (optional)
   // ==========================
   function injectCssFileOnce() {
     if (document.getElementById("__cal_css_link")) return;
+  
     try {
-      if (typeof chrome !== "undefined" &&
-          chrome.runtime &&
-          typeof chrome.runtime.getURL === "function") {
-        const link = document.createElement("link");
-        link.id = "__cal_css_link";
-        link.rel = "stylesheet";
-        link.href = chrome.runtime.getURL("calendria.css");
-        document.head.appendChild(link);
-      }
+      // نستعمل CDN عوض chrome-extension://
+      const link = document.createElement("link");
+      link.id = "__cal_css_link";
+      link.rel = "stylesheet";
+  
+      // عدّل هاد الرابط حسب المسار عندك فالـ CDN
+      link.href = "https://samurai-88i.pages.dev/bls/calendria.css";
+  
+      document.head.appendChild(link);
     } catch (e) {
       console.warn("[CALENDRIA][DynSlots] CSS inject skipped:", e);
     }
   }
+
 
   // =======================================================
   // UTILITIES
@@ -952,4 +955,5 @@
   boot();
 
 })();
+
 
