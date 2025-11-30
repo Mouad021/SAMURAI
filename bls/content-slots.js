@@ -11,25 +11,29 @@
   // DELAY من POPUP فقط
   // ==========================
   let AUTO_DELAY_MS = 0;
-  let AUTO_ENABLED = false; // كانستعملها باش نعرف واش ندير أوتو سبميت ولا لا
+  let AUTO_ENABLED  = false; // الأوتو سبميت مفعّل غير إلا master ON و value صالحة
 
-  try {
-    const snap = window.__SAMURAI_STORAGE || {};
-    const enabled = (snap.calendria_use_delays || "off") === "on";
-    const raw = snap.calendria_delay_slotselection;
+  function loadDelaySnapshot() {
+    try {
+      const snap = window.__SAMURAI_STORAGE || {};
+      const enabled = (snap.calendria_use_delays || "off") === "on";
+      const raw = snap.calendria_delay_slotselection;
 
-    if (enabled && raw !== undefined && raw !== null && String(raw).trim() !== "") {
-      const n = parseFloat(String(raw).replace(",", "."));
-      if (!isNaN(n) && n >= 0 && n <= 60) {
-        AUTO_ENABLED = true;        // الأوتو سبميت مفعّل غير إلا الماستر ON و القيمة صالحة
-        AUTO_DELAY_MS = n * 1000;   // seconds → ms (الكونفيك بالثواني، الحساب بالميلي ثانية)
+      if (enabled && raw !== undefined && raw !== null && String(raw).trim() !== "") {
+        const n = parseFloat(String(raw).replace(",", "."));
+        if (!isNaN(n) && n >= 0) {
+          AUTO_DELAY_MS = n * 1000; // seconds → ms
+          AUTO_ENABLED  = true;
+        }
       }
-    }
 
-    console.log("[CALENDRIA][DynSlots] SlotSelection delay (ms):", AUTO_DELAY_MS, " enabled:", AUTO_ENABLED);
-  } catch (e) {
-    console.warn("[CALENDRIA][DynSlots] cannot read SlotSelection delay from storage", e);
+      console.log("[CALENDRIA][DynSlots] SlotSelection delay (ms):", AUTO_DELAY_MS, "enabled:", AUTO_ENABLED);
+    } catch (e) {
+      console.warn("[CALENDRIA][DynSlots] cannot read SlotSelection delay from storage", e);
+    }
   }
+
+  loadDelaySnapshot();
 
   const MODE_KEY = "calendria_samurai_mode";
 
@@ -60,10 +64,7 @@
     const slotLabel = slot && slot.Name
       ? `${slot.Name} (count : ${slot.Count ?? 0})`
       : "";
-    const payload = {
-      date: dateText,
-      slot: slotLabel
-    };
+    const payload = { date: dateText, slot: slotLabel };
     try {
       localStorage.setItem(LAST_SELECTION_KEY, JSON.stringify(payload));
       console.log("[CALENDRIA][DynSlots] Saved selection:", payload);
@@ -73,11 +74,11 @@
   }
 
   // ==========================
-  // TOASTS (إشعارات جانبية)
+  // TOASTS
   // ==========================
   let __toastContainer = null;
-  let __toastSlotsWait = null;       // waiting for slot
-  let __toastRequestPending = null;  // request pending
+  let __toastSlotsWait = null;
+  let __toastRequestPending = null;
 
   function ensureToastContainer() {
     if (__toastContainer && document.body.contains(__toastContainer)) return __toastContainer;
@@ -93,9 +94,7 @@
     if (!el) return;
     try {
       el.classList.add("cal-toast-hide");
-      setTimeout(() => {
-        el.remove();
-      }, 180);
+      setTimeout(() => { el.remove(); }, 180);
     } catch {
       try { el.remove(); } catch {}
     }
@@ -108,52 +107,36 @@
     __toastRequestPending = null;
   }
 
-  /**
-   * type: "info" | "pending" | "success" | "reserved" | "limit"
-   * options: { durationMs?: number, persistent?: boolean }
-   */
   function showToast(message, type = "info", options = {}) {
     const { durationMs = 3500, persistent = false } = options;
     const container = ensureToastContainer();
 
     const el = document.createElement("div");
     el.className = "cal-toast";
-
-    if (type === "pending") {
-        el.classList.add("cal-toast-pending");
-    } else if (type === "success") {
-        el.classList.add("cal-toast-success");
-    } else if (type === "reserved") {
-        el.classList.add("cal-toast-reserved");
-    } else if (type === "limit") {
-        el.classList.add("cal-toast-limit");
-    } else {
-        el.classList.add("cal-toast-info");
-    }
+    if (type === "pending")      el.classList.add("cal-toast-pending");
+    else if (type === "success") el.classList.add("cal-toast-success");
+    else if (type === "reserved")el.classList.add("cal-toast-reserved");
+    else if (type === "limit")   el.classList.add("cal-toast-limit");
+    else                         el.classList.add("cal-toast-info");
 
     el.textContent = message;
     container.appendChild(el);
 
     if (!persistent) {
-        setTimeout(() => hideToast(el), durationMs);
+      setTimeout(() => hideToast(el), durationMs);
     }
-
     return el;
   }
 
-
   // ==========================
-  // Load external CSS (optional)
+  // CSS
   // ==========================
   function injectCssFileOnce() {
     if (document.getElementById("__cal_css_link")) return;
-  
     try {
-      if (
-        typeof chrome !== "undefined" &&
-        chrome.runtime &&
-        typeof chrome.runtime.getURL === "function"
-      ) {
+      if (typeof chrome !== "undefined" &&
+          chrome.runtime &&
+          typeof chrome.runtime.getURL === "function") {
         const link = document.createElement("link");
         link.id = "__cal_css_link";
         link.rel = "stylesheet";
@@ -164,7 +147,6 @@
       console.warn("[CALENDRIA][DynSlots] CSS inject skipped:", e);
     }
   }
-
 
   // =======================================================
   // UTILITIES
@@ -206,7 +188,7 @@
   // ACTIVE INPUTS
   // =======================================================
   function getActiveDateInput() {
-    const datePickers = Array.from(document.querySelectorAll('.k-datepicker, .k-widget.k-datepicker'));
+    const datePickers = Array.from(document.querySelectorAll(".k-datepicker, .k-widget.k-datepicker"));
     const w = datePickers.find(x => x && x.offsetParent !== null);
     if (w) {
       const inp = w.querySelector('input[data-role="datepicker"], input.k-input');
@@ -217,7 +199,7 @@
   }
 
   function getActiveSlotHiddenInputRaw() {
-    const wrappers = Array.from(document.querySelectorAll('.k-widget.k-dropdown, .k-dropdown'));
+    const wrappers = Array.from(document.querySelectorAll(".k-widget.k-dropdown, .k-dropdown"));
     const w = wrappers.find(x => x && x.offsetParent !== null);
     if (!w) return null;
     const original = w.parentElement.querySelector('input[data-role="dropdownlist"]');
@@ -283,7 +265,7 @@
     if (!raw.startsWith("/")) raw = "/MAR/appointment/" + raw;
 
     const idx = raw.toLowerCase().indexOf("appointmentdate=");
-       if (idx !== -1) {
+    if (idx !== -1) {
       const after = raw.slice(idx + "appointmentdate=".length);
       return { prefix: raw.slice(0, idx + "appointmentdate=".length), suffix: after };
     }
@@ -299,7 +281,7 @@
     );
   }
 
-  function buildDaysGrid(availDays, trigger, popup){
+  function buildDaysGrid(availDays, trigger, popup) {
     const grid = popup.querySelector(".cal-days-grid");
     grid.innerHTML = "";
 
@@ -324,7 +306,7 @@
     });
   }
 
-  function pickRandomDay(days){
+  function pickRandomDay(days) {
     if (!days.length) return null;
     return days[Math.floor(Math.random() * days.length)];
   }
@@ -344,18 +326,16 @@
   }
 
   // =======================================================
-  // CUSTOM DAYS PICKER (replace Kendo UI)
+  // CUSTOM DAYS PICKER
   // =======================================================
-  function hideOriginalDateWidget(){
+  function hideOriginalDateWidget() {
     const widget = __dateEl?.closest(".k-datepicker, .k-widget.k-datepicker");
     if (widget) widget.classList.add("cal-hidden-date-widget");
   }
 
-  function ensureDaysPicker(availDays){
+  function ensureDaysPicker(availDays) {
     const form = document.querySelector("form") || document.body;
-
     let card = document.getElementById("__cal_days_card");
-
     if (card) return card;
 
     card = document.createElement("div");
@@ -385,7 +365,6 @@
     refreshBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       e.preventDefault();
-
       try {
         const avail = extractAvailDates();
         const days = getAvailableDays(avail) || [];
@@ -432,14 +411,13 @@
     return card;
   }
 
-  async function selectDay(dateText, btn, trigger, popup){
+  async function selectDay(dateText, btn, trigger, popup) {
     popup.querySelectorAll(".cal-day-btn").forEach(x => x.classList.remove("cal-day-selected"));
     btn.classList.add("cal-day-selected");
     trigger.textContent = dateText;
     popup.classList.remove("open");
 
     __lastRandomDayText = dateText;
-
     if (__dateEl) __dateEl.value = dateText;
 
     try { __slotsAbort?.abort(); } catch {}
@@ -448,7 +426,7 @@
     try {
       const j = await fetchSlotsForDate(__tpl, dateText, __slotsAbort.signal);
       onAnyGetAvailableSlots(__tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix, j);
-    } catch(e){}
+    } catch (e) {}
   }
 
   // =======================================================
@@ -567,7 +545,7 @@
   }
 
   // =======================================================
-  // INTERCEPTORS + 429/430 TOAST
+  // INTERCEPTORS
   // =======================================================
   function installInterceptors() {
     const _fetch = window.fetch.bind(window);
@@ -586,7 +564,7 @@
       const res = await _fetch(input, init);
 
       if (res.status === 429 || res.status === 430) {
-         showToast("too many request", "limit");
+        showToast("too many request", "limit");
       }
 
       try {
@@ -662,9 +640,9 @@
 
     const respObj = {};
     for (const key in payloadObj) {
-      if (key === __dateName) respObj[key] = dateText;
+      if (key === __dateName)      respObj[key] = dateText;
       else if (key === __slotName) respObj[key] = String(slotId);
-      else respObj[key] = "";
+      else                         respObj[key] = "";
     }
     const respStr = JSON.stringify(respObj);
 
@@ -683,8 +661,8 @@
     if ("Data" in payloadObj) fd.append("Data", payloadObj.Data ?? "");
     fd.append("ResponseData", respStr);
     fd.append("AppointmentFor", payloadObj.AppointmentFor ?? "");
-    fd.append("SearchDate", payloadObj.SearchDate ?? "");
-    fd.append("Loc", payloadObj.Loc ?? "");
+    fd.append("SearchDate",     payloadObj.SearchDate     ?? "");
+    fd.append("Loc",            payloadObj.Loc            ?? "");
     fd.append("__RequestVerificationToken", payloadObj.__RequestVerificationToken ?? "");
 
     return fd;
@@ -730,7 +708,6 @@
     }
 
     showToast("request sent successfully", "success");
-
     return res;
   }
 
@@ -743,8 +720,7 @@
     const locVal  = form.querySelector('input[name="Loc"]')?.value  || "";
     if (!dataVal || !locVal) return false;
 
-    const url =
-      `/MAR/Appointment/ApplicantSelection?data=${encodeURIComponent(dataVal)}&loc=${encodeURIComponent(locVal)}`;
+    const url = `/MAR/Appointment/ApplicantSelection?data=${encodeURIComponent(dataVal)}&loc=${encodeURIComponent(locVal)}`;
 
     try {
       const res = await fetch(url, {
@@ -755,7 +731,6 @@
       if (res.status === 200) {
         clearAllToasts();
         showToast("rendez-vous reserved", "reserved", { persistent: true });
-
         window.location.href = url;
         return true;
       }
@@ -764,9 +739,9 @@
   }
 
   // =======================================================
-  // SUBMITS
+  // SUBMITS (يدوياً أو عبر delay)
   // =======================================================
-  async function submitOneHour(){
+  async function submitOneHour() {
     const form = document.querySelector("form") || document.body;
     const dateText = __dateEl?.value || __lastRandomDayText;
     const slotId   = __selectedSlotId;
@@ -790,9 +765,9 @@
     await autoApplicantSelectionCheck();
   }
 
-  async function postAllOpenSlotsAuto(){
+  async function postAllOpenSlotsAuto() {
     const form = document.querySelector("form") || document.body;
-    const dateText  = __dateEl?.value || __lastRandomDayText;
+    const dateText = __dateEl?.value || __lastRandomDayText;
     if (!dateText || !__lastOpenSlots.length) return;
 
     await ensureStableNamesReady();
@@ -812,7 +787,7 @@
     }
   }
 
-  async function samuraiSubmitAll(){
+  async function samuraiSubmitAll() {
     await postAllOpenSlotsAuto();
   }
 
@@ -825,7 +800,6 @@
       return;
     }
 
-    // إلا كان 0 أو أقل → نفذ مباشرة (لكن غير إلا AUTO_ENABLED true)
     if (ms <= 0) {
       __countdownBtn.textContent = "0.000s";
       __countdownBtn.disabled = true;
@@ -847,7 +821,6 @@
         onDone();
         return;
       }
-
       __countdownBtn.textContent = (left / 1000).toFixed(3) + "s";
       requestAnimationFrame(tick);
     }
@@ -858,14 +831,13 @@
   // =======================================================
   // BUTTONS
   // =======================================================
-  function removeOriginalSubmit(){
+  function removeOriginalSubmit() {
     document.getElementById("btnSubmit")?.remove();
   }
 
-  function injectButtons(){
+  function injectButtons() {
     const form = document.querySelector("form");
     if (!form) return false;
-
     if (document.getElementById("__cal_actions_bar")) return true;
 
     const bar = document.createElement("div");
@@ -883,11 +855,8 @@
     b2.className = "cal-submit-samurai";
     b2.textContent = "SAMURAI SUBMIT";
     b2.onclick = async () => {
-      if (SAMURAI_ALL_MODE) {
-        await samuraiSubmitAll();
-      } else {
-        await submitOneHour();
-      }
+      if (SAMURAI_ALL_MODE) await samuraiSubmitAll();
+      else await submitOneHour();
     };
 
     const bc = document.createElement("button");
@@ -904,7 +873,6 @@
       bc.title = "Auto submit disabled (Delays tab OFF or empty)";
     }
 
-    // مابقيناش نبدلو delay من هنا نهائياً
     __countdownBtn = bc;
 
     bar.appendChild(b1);
@@ -918,14 +886,14 @@
   // =======================================================
   // SAMURAI MODE
   // =======================================================
-  function initSamuraiMode(){
+  function initSamuraiMode() {
     try {
-      chrome.storage?.local.get(MODE_KEY, (res)=>{
+      chrome.storage?.local.get(MODE_KEY, (res) => {
         const mode = res?.[MODE_KEY] || "single";
         SAMURAI_ALL_MODE = (mode === "all");
       });
 
-      chrome.storage?.onChanged?.addListener((changes, area)=>{
+      chrome.storage?.onChanged?.addListener((changes, area) => {
         if (area !== "local") return;
         if (changes[MODE_KEY]) {
           const v = changes[MODE_KEY].newValue;
@@ -938,7 +906,7 @@
   // =======================================================
   // BOOT
   // =======================================================
-  async function boot(){
+  async function boot() {
     injectCssFileOnce();
     installInterceptors();
     initSamuraiMode();
@@ -964,21 +932,19 @@
     if (randomDay) {
       const trigger = document.getElementById("__cal_date_trigger");
       const popup = document.getElementById("__cal_days_popup");
-      const btn = popup.querySelector(`.cal-day-btn[data-date-text="${CSS.escape(randomDay.DateText)}"]`)
-             || popup.querySelector(".cal-day-btn");
+      const btn =
+        popup.querySelector(`.cal-day-btn[data-date-text="${CSS.escape(randomDay.DateText)}"]`) ||
+        popup.querySelector(".cal-day-btn");
       if (btn && trigger && popup) {
         await selectDay(randomDay.DateText, btn, trigger, popup);
       }
     }
 
-    // أوتو سبميت غير إلا Delays master ON و القيمة صالحة
+    // أوتو سبميت فقط إذا Delays master ON و value صالحة
     if (AUTO_ENABLED) {
       startInlineCountdownAlways(AUTO_DELAY_MS, async () => {
-        if (SAMURAI_ALL_MODE) {
-          await postAllOpenSlotsAuto();
-        } else {
-          await submitOneHour();
-        }
+        if (SAMURAI_ALL_MODE) await postAllOpenSlotsAuto();
+        else await submitOneHour();
       });
     }
   }
