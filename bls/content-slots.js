@@ -121,16 +121,31 @@
 
 
   // ==========================
-  // Load external CSS
+  // Load external CSS (optional)
   // ==========================
-  function injectCssFileOnce(){
+  function injectCssFileOnce() {
+    // إذا كان الستايل ديالنا راه كاين، ما ندير والو
     if (document.getElementById("__cal_css_link")) return;
-    const link = document.createElement("link");
-    link.id = "__cal_css_link";
-    link.rel = "stylesheet";
-    link.href = chrome.runtime.getURL("calendria.css");
-    document.head.appendChild(link);
+  
+    try {
+      // نخدم فقط إذا كنخدم من داخل extension وعندنا chrome.runtime.getURL
+      if (
+        typeof chrome !== "undefined" &&
+        chrome.runtime &&
+        typeof chrome.runtime.getURL === "function"
+      ) {
+        const link = document.createElement("link");
+        link.id = "__cal_css_link";
+        link.rel = "stylesheet";
+        link.href = chrome.runtime.getURL("calendria.css");
+        document.head.appendChild(link);
+      }
+      // وإلا: ما ندير والو (الـ CSS راه جاي من insertCSS فـ background)
+    } catch (e) {
+      console.warn("[CALENDRIA][DynSlots] CSS inject skipped:", e);
+    }
   }
+
 
   // =======================================================
   // UTILITIES
@@ -923,3 +938,4 @@
   boot();
 
 })();
+
