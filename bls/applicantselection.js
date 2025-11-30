@@ -22,29 +22,28 @@
   }
 
   function injectCssOnce() {
+    // إلا كان الستايل ديالنا راه كاين، ما ندير والو
     if (document.getElementById("__cal_applicant_css")) return;
-    const link = document.createElement("link");
-    link.id = "__cal_applicant_css";
-    link.rel = "stylesheet";
-    link.href = chrome.runtime.getURL("applicant.css");
-    document.head.appendChild(link);
-  }
-
-  // ----------------------------
-  // قراءة date/slot من localStorage
-  // ----------------------------
-  function readLastSelection() {
+  
     try {
-      const raw = localStorage.getItem(LAST_SELECTION_KEY);
-      if (!raw) return null;
-      const obj = JSON.parse(raw);
-      if (!obj || !obj.date || !obj.slot) return null;
-      return obj;
+      // نخدم غير إلى كنخدم من داخل extension وعندنا chrome.runtime.getURL
+      if (
+        typeof chrome !== "undefined" &&
+        chrome.runtime &&
+        typeof chrome.runtime.getURL === "function"
+      ) {
+        const link = document.createElement("link");
+        link.id = "__cal_applicant_css";
+        link.rel = "stylesheet";
+        link.href = chrome.runtime.getURL("applicant.css");
+        document.head.appendChild(link);
+      }
+      // وإلا: ما ندير والو (الـ CSS راه جاي أصلاً من insertCSS فالـ background)
     } catch (e) {
-      warn("cannot parse last selection", e);
-      return null;
+      console.warn("[CALENDRIA][Applicant] CSS inject skipped:", e);
     }
   }
+
 
   // ----------------------------
   // قراءة location / visasubtype / category من storage
@@ -442,3 +441,4 @@
 
   boot();
 })();
+
