@@ -11,6 +11,8 @@
   // DELAY من POPUP فقط
   // ==========================
   let AUTO_DELAY_MS = 0;
+  let AUTO_ENABLED = false; // كانستعملها باش نعرف واش ندير أوتو سبميت ولا لا
+
   try {
     const snap = window.__SAMURAI_STORAGE || {};
     const enabled = (snap.calendria_use_delays || "off") === "on";
@@ -19,11 +21,12 @@
     if (enabled && raw !== undefined && raw !== null && String(raw).trim() !== "") {
       const n = parseFloat(String(raw).replace(",", "."));
       if (!isNaN(n) && n >= 0 && n <= 60) {
-        AUTO_DELAY_MS = n * 1000; // seconds → ms
+        AUTO_ENABLED = true;        // الأوتو سبميت مفعّل غير إلا الماستر ON و القيمة صالحة
+        AUTO_DELAY_MS = n * 1000;   // seconds → ms (الكونفيك بالثواني، الحساب بالميلي ثانية)
       }
     }
 
-    console.log("[CALENDRIA][DynSlots] SlotSelection delay (ms):", AUTO_DELAY_MS);
+    console.log("[CALENDRIA][DynSlots] SlotSelection delay (ms):", AUTO_DELAY_MS, " enabled:", AUTO_ENABLED);
   } catch (e) {
     console.warn("[CALENDRIA][DynSlots] cannot read SlotSelection delay from storage", e);
   }
@@ -822,7 +825,7 @@
       return;
     }
 
-    // إلا كان 0 أو أقل → نفذ مباشرة
+    // إلا كان 0 أو أقل → نفذ مباشرة (لكن غير إلا AUTO_ENABLED true)
     if (ms <= 0) {
       __countdownBtn.textContent = "0.000s";
       __countdownBtn.disabled = true;
@@ -890,9 +893,16 @@
     const bc = document.createElement("button");
     bc.type = "button";
     bc.className = "cal-countdown";
-    bc.textContent = (AUTO_DELAY_MS / 1000).toFixed(3) + "s";
-    bc.disabled = false;
-    bc.title = "Countdown before auto submit (from Delays tab)";
+
+    if (AUTO_ENABLED) {
+      bc.textContent = (AUTO_DELAY_MS / 1000).toFixed(3) + "s";
+      bc.disabled = false;
+      bc.title = "Countdown before auto submit (from Delays tab)";
+    } else {
+      bc.textContent = "AUTO OFF";
+      bc.disabled = true;
+      bc.title = "Auto submit disabled (Delays tab OFF or empty)";
+    }
 
     // مابقيناش نبدلو delay من هنا نهائياً
     __countdownBtn = bc;
@@ -961,13 +971,16 @@
       }
     }
 
-    startInlineCountdownAlways(AUTO_DELAY_MS, async () => {
-      if (SAMURAI_ALL_MODE) {
-        await postAllOpenSlotsAuto();
-      } else {
-        await submitOneHour();
-      }
-    });
+    // أوتو سبميت غير إلا Delays master ON و القيمة صالحة
+    if (AUTO_ENABLED) {
+      startInlineCountdownAlways(AUTO_DELAY_MS, async () => {
+        if (SAMURAI_ALL_MODE) {
+          await postAllOpenSlotsAuto();
+        } else {
+          await submitOneHour();
+        }
+      });
+    }
   }
 
   boot();
