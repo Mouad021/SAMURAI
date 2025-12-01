@@ -18,12 +18,10 @@
   // =========================
   // CAPTCHA MODE (AW8 / NoCaptchaAI)
   // =========================
-  //  ✅ يعتمد فقط على الزر:
-  //  - OFF  = AW8
-  //  - ON   = NoCaptchaAI
-  // نستعمل حتى window.__CAL_GLOBAL_CAPTCHA_MODE باش نفس القيمة تتشارك بين الصفحات
-  let __cal_captcha_mode   = (window.__CAL_GLOBAL_CAPTCHA_MODE || "aw8");       // "aw8" | "nocaptchaai"
-  let __cal_captcha_apikey = (window.__CAL_GLOBAL_NCAI_KEY || "");              // NoCaptchaAI apiKey
+  //  OFF  = "aw8"
+  //  ON   = "nocaptchaai"
+  let __cal_captcha_mode   = (window.__CAL_GLOBAL_CAPTCHA_MODE || "aw8");
+  let __cal_captcha_apikey = (window.__CAL_GLOBAL_NCAI_KEY || "");
   let __captcha_settings_loaded = false;
 
   // =========================
@@ -34,13 +32,13 @@
   // Guard لتفادي multi-POST بنفس التوكن
   const LAST_TOKEN_KEY = "calendria_apptcap_last_token";
 
-  // حالة إرسال الطلب (باش مانخربقوش بين waiting / preparing / sent)
+  // حالة إرسال الطلب
   let __appt_state = "waiting"; // waiting → preparing → sent
 
   // =========================
   // Delay config (from popup)
   // =========================
-  const DEFAULT_PRE_DELAY_MS = 1000; // 1s القديمة
+  const DEFAULT_PRE_DELAY_MS = 1000;
   let PRE_DELAY_MS = DEFAULT_PRE_DELAY_MS;
 
   try {
@@ -72,9 +70,7 @@
   // =========================
   // Helpers
   // =========================
-  function qa(sel) {
-    return Array.from(document.querySelectorAll(sel));
-  }
+  const qa = (sel) => Array.from(document.querySelectorAll(sel));
 
   function getToken() {
     const t = qa("input[name='__RequestVerificationToken']");
@@ -111,7 +107,7 @@
   }
 
   // =========================
-  // إرسال POST مع منطق redirect (VisaType / NewAppointment)
+  // إرسال POST مع منطق redirect
   // =========================
   async function sendPOST(token, codes, data, clientData) {
     try {
@@ -153,14 +149,12 @@
 
       // ===== VisaType → نمشيو لها ونخرج =====
       if (finalUrl.includes("/mar/appointment/visatype")) {
-        console.log(
-          "[CALENDRIA][AppointmentCaptcha] Final → VisaType, GO!"
-        );
+        console.log("[CALENDRIA][AppointmentCaptcha] Final → VisaType, GO!");
         location.href = resp.url;
         return;
       }
 
-      // ===== NewAppointment?msg= → نبقى فـ newappointment نظيفة =====
+      // ===== NewAppointment?msg= → نرجعو لنسخة نظيفة =====
       if (finalUrl.includes("/mar/appointment/newappointment?msg=")) {
         console.log(
           "[CALENDRIA][AppointmentCaptcha] Final → NewAppointment?msg=, reload clean /NewAppointment"
@@ -242,7 +236,7 @@
         return;
       }
 
-      // حفظ آخر توكن باش مانعاودوش نفس الطلب من loopPostOnce
+      // حفظ آخر توكن
       sessionStorage.setItem(LAST_TOKEN_KEY, fresh.token);
 
       __appt_state = "sent";
@@ -255,7 +249,7 @@
   loopPostOnce();
 
   // =========================
-  // NoCaptchaAI solver (Appointment) — يختار الصور فقط، POST يبقى منطق CALENDRIA
+  // NoCaptchaAI solver (Appointment) — يختار الصور فقط
   // =========================
   class NoCaptchaAppointmentBot {
     constructor() {
@@ -306,7 +300,6 @@
     }
 
     async _solveOnce() {
-      // safety runtime gate
       if (__cal_captcha_mode !== "nocaptchaai") {
         console.log("[NCAI][Appointment] mode changed, abort.");
         return;
@@ -374,7 +367,6 @@
       const timer = setInterval(async () => {
         tries++;
 
-        // gate لو تبدل المود وسط الخدمة
         if (__cal_captcha_mode !== "nocaptchaai") {
           console.log("[NCAI][Appointment] mode switched away, stop.");
           clearInterval(timer);
@@ -415,7 +407,7 @@
   }
 
   // =========================
-  // AW8 solver
+  // AW8 solver (يختار الصور فقط)
   // =========================
   class BaseAw8CaptchaBot {
     constructor(contextName = "AW8 Captcha") {
@@ -792,7 +784,7 @@
   }
 
   // =========================
-  // CAPTCHA MODE bootstrap (بعد ما تجهز كلشي الفوق)
+  // CAPTCHA MODE bootstrap
   // =========================
   function onCaptchaSettingsReady() {
     __captcha_settings_loaded = true;
