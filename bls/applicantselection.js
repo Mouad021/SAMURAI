@@ -34,36 +34,81 @@
     if (window.__calendria_applicant_sound_played) return;
     window.__calendria_applicant_sound_played = true;
 
+    let src;
     try {
-      let src;
       if (chrome?.runtime?.getURL) {
-        // ملف الصوت داخل الإضافة: ui/pirate-sfx-2.mp3
         src = chrome.runtime.getURL("ui/pirate-sfx-2.mp3");
       } else {
         src = "pirate-sfx-2.mp3";
       }
+    } catch (e) {
+      warn("Cannot build sound URL:", e);
+      return;
+    }
 
+    try {
       const audio = new Audio(src);
       audio.volume = 1.0;
 
-      const tryPlay = () => {
-        audio.play().catch((e) => {
+      // نخليهم فـ global باش تقدر تجرب من الكونسول
+      window.__CAL_APPLICANT_SOUND_URL = src;
+      window.__CAL_APPLICANT_AUDIO = audio;
+      window.__CAL_APPLICANT_TEST = function () {
+        try {
+          const a = new Audio(window.__CAL_APPLICANT_SOUND_URL);
+          a.volume = 1.0;
+          a.play().then(() => {
+            log("TEST sound play() OK");
+          }).catch(err => {
+            warn("TEST sound play() error:", err);
+          });
+        } catch (e) {
+          warn("TEST sound global error:", e);
+        }
+      };
+
+      audio.addEventListener("play", () => log("Applicant sound: play event"));
+      audio.addEventListener("ended", () =>
+        log("Applicant sound: ended")
+      );
+      audio.addEventListener("error", () =>
+        warn("Applicant sound error event:", audio.error)
+      );
+
+      const playNow = () => {
+        audio.currentTime = 0;
+        audio.play().then(() => {
+          log("Applicant sound play() success");
+        }).catch((e) => {
           if (e && e.name === "NotAllowedError") {
-            // المتصفح منع autoplay → نستناو أول click من اليوزر
-            warn("Applicant sound autoplay blocked, waiting for first click");
+            // المتصفح ما خلاش autoplay → نستنى أول interaction
+            warn("Applicant sound autoplay blocked, waiting for user gesture");
+
             const handler = () => {
-              audio.play().catch(err =>
-                warn("Sound play after click failed:", err)
-              );
+              audio.currentTime = 0;
+              audio.play().then(() => {
+                log("Applicant sound played after user gesture");
+              }).catch(err => {
+                warn("Applicant sound still failed after gesture:", err);
+              });
             };
-            document.addEventListener("click", handler, { once: true });
+
+            // نسمعو لأي click / keydown (مرة وحدة)
+            document.addEventListener("pointerdown", handler, {
+              once: true,
+              capture: true
+            });
+            document.addEventListener("keydown", handler, {
+              once: true,
+              capture: true
+            });
           } else {
-            warn("Applicant sound error:", e);
+            warn("Applicant sound play() error:", e);
           }
         });
       };
 
-      tryPlay();
+      playNow();
     } catch (e) {
       warn("Applicant sound global error:", e);
     }
@@ -477,7 +522,6 @@
   // BOOT
   // ==========================================================
   function boot() {
-    // CSS ديالك جاي من الـ CDN عبر background، ما نلمسوهش هنا
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", () => {
         playApplicantSoundOnce();   // 🔊
