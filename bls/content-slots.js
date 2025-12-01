@@ -18,9 +18,6 @@
   // الفاصل بين الطلبات الإضافية (بعد الأولى) بالميلي ثانية
   const REPEAT_GAP_MS = 1000;
 
-  // فلاغ لإيقاف السكوانس إلى وصلنا 200 في ApplicantSelection
-  let __autoSequenceStop = false;
-
   function loadDelaySnapshot() {
     try {
       const snap = window.__SAMURAI_STORAGE || {};
@@ -260,36 +257,16 @@
   // availDates + template
   // =======================================================
   function extractAvailDates() {
-    // 1) نحاول ناخدها مباشرة من window/unsafeWindow
     try {
-      const gSource =
-        (typeof unsafeWindow !== "undefined" ? unsafeWindow : window);
-      const g = gSource?.availDates || window.availDates;
+      const g = unsafeWindow?.availDates || window.availDates;
       if (g?.ad && Array.isArray(g.ad)) return g;
     } catch {}
-  
-    // 2) نحاول نلقطها من السكربتات
     const txt = getAllScriptText();
     const m = txt.match(/var\s+availDates\s*=\s*({[\s\S]*?});/);
     if (!m) return null;
-  
-    const rawObj = m[1];
-  
-    // أولاً نحاول JSON.parse
-    try {
-      return JSON.parse(rawObj);
-    } catch (e1) {
-      // ثانياً new Function لكن داخل try/catch باش ما يطيحش السكربت
-      try {
-        const fn = new Function("return " + rawObj);
-        return fn();
-      } catch (e2) {
-        console.warn("[CALENDRIA][DynSlots] availDates parse failed", e1, e2);
-        return null;
-      }
-    }
+    try { return JSON.parse(m[1]); }
+    catch { return new Function("return " + m[1])(); }
   }
-
 
   function extractGetSlotsTemplate() {
     const txt = getAllScriptText();
@@ -314,7 +291,7 @@
       const after = raw.slice(idx + "appointmentdate=".length);
       return { prefix: raw.slice(0, idx + "appointmentdate=".length), suffix: after };
     }
-    return { prefix: raw + "&appointmentDate=", "" };
+    return { prefix: raw + "&appointmentDate=", suffix: "" };
   }
 
   function getAvailableDays(avail) {
@@ -774,9 +751,6 @@
         redirect: "manual"
       });
       if (res.status === 200) {
-        // ↙ هنا نوقف أي سكوانس أخرى (مايبقاش يبعث طلب ثاني/ثالث...)
-        __autoSequenceStop = true;
-
         clearAllToasts();
         showToast("rendez-vous reserved", "reserved", { persistent: true });
         window.location.href = url;
@@ -789,45 +763,28 @@
   // =======================================================
   // SUBMITS
   // =======================================================
-  async function submitOneHour(slotIdOverride) {
+  async function submitOneHour() {
     const form = document.querySelector("form") || document.body;
     const dateText = __dateEl?.value || __lastRandomDayText;
-    const chosenSlotId = slotIdOverride || __selectedSlotId;
-  
+    const slotId   = __selectedSlotId;
+
     await ensureStableNamesReady();
-  
-    if (!dateText || !chosenSlotId) {
+
+    if (!dateText || !slotId) {
       alert("اختار ساعة من البوكسات أولا");
       return;
     }
-  
+
     const slot =
-      __lastOpenSlots.find(s => String(s.Id) === String(chosenSlotId)) ||
-      { Id: chosenSlotId, Name: "", Count: null };
-  
+      __lastOpenSlots.find(s => String(s.Id) === String(slotId)) ||
+      { Id: slotId, Name: "", Count: null };
     saveLastSelection(dateText, slot);
-  
-    // نستعمل snapshotBasePayload + buildFormDataForSlot
+
     const { base, controls } = snapshotBasePayload(form);
-    const fd = buildFormDataForSlot({
-      dateText,
-      slotId: chosenSlotId,
-      base,
-      controls,
-      form
-    });
-  
-    log("[DynSlots] FULL BUILT PAYLOAD OBJECT:", Object.fromEntries(fd.entries()));
-  
-    // إذا AUTO_ENABLED = false → نرسل مباشرة
-    // إذا AUTO_ENABLED = true → ننتظر AUTO_DELAY_MS
-    if (!AUTO_ENABLED || AUTO_DELAY_MS <= 0) {
-      await postSlotSelection(fd);
-    } else {
-      log("[DynSlots] waiting", AUTO_DELAY_MS, "ms before custom POST...");
-      await new Promise(r => setTimeout(r, AUTO_DELAY_MS));
-      await postSlotSelection(fd);
-    }
+    const fd = buildFormDataForSlot({ dateText, slotId, base, controls, form });
+
+    await postSlotSelection(fd);
+    await autoApplicantSelectionCheck();
   }
 
   async function postAllOpenSlotsAuto() {
@@ -838,11 +795,6 @@
     await ensureStableNamesReady();
 
     for (let i = 0; i < __lastOpenSlots.length; i++) {
-      if (__autoSequenceStop) {
-        log("[CALENDRIA][DynSlots] auto sequence stopped (200 reached) during ALL mode");
-        return;
-      }
-
       const slot = __lastOpenSlots[i];
       const slotId = slot.Id;
 
@@ -976,73 +928,28 @@
   // =======================================================
   // AUTO SEQUENCE (delay + تكرار الطلبات)
   // =======================================================
-  // تبني لائحة slotIds مختلفة انطلاقاً من الساعة المختارة
-  function buildAutoSlotSequence(repeatCount) {
-    const slots = Array.isArray(__lastOpenSlots) ? __lastOpenSlots : [];
-    if (!slots.length || !__selectedSlotId) return [__selectedSlotId];
+  async function runAutoSequence() {
+    const repeat = AUTO_REPEAT_COUNT || 1;
+    log("Auto sequence start. delay(ms):", AUTO_DELAY_MS, "repeat:", repeat);
 
-    const idx0 = slots.findIndex(s => String(s.Id) === String(__selectedSlotId));
-    if (idx0 < 0) return [__selectedSlotId];
-
-    const max = Math.min(repeatCount, slots.length);
-    const seq = [];
-    for (let i = 0; i < max; i++) {
-      const idx = (idx0 + i) % slots.length; // يمشي للساعة اللي بعد وما يرجعش لنفس وحدة
-      seq.push(String(slots[idx].Id));
-    }
-    return seq;
-  }
-
-  // السيكوانس: أول طلب يخرج مباشرة (الـ delay مطبق داخل submitOneHour)
-  // والباقي كل واحد بعد REPEAT_GAP_MS، مع إلغاء الباقي إذا وصلنا 200
-  function startAutoSequence() {
-    if (!AUTO_ENABLED) {
-      log("[CALENDRIA][DynSlots] Auto mode disabled");
-      return;
-    }
-
-    __autoSequenceStop = false; // نرجعوها false فكل تشغيل جديد
-
-    const repeat = Math.max(1, AUTO_REPEAT_COUNT || 1);
-    const seq = buildAutoSlotSequence(repeat);
-
-    log("[CALENDRIA][DynSlots] Auto sequence (no wait here) repeat:", seq.length);
-
-    let index = 0;
-
-    const fireOne = async () => {
-      if (__autoSequenceStop) {
-        log("[CALENDRIA][DynSlots] Auto sequence stopped (flag=true) before shot");
-        return;
-      }
-
-      if (index >= seq.length) {
-        log("[CALENDRIA][DynSlots] Auto sequence finished (all shots done)");
-        return;
-      }
-
-      const sid = seq[index++];
-      log("[CALENDRIA][DynSlots] Auto shot", index, "slotId:", sid);
-
-      // نرسل الطلب لهاد الساعة
-      await submitOneHour(sid);
-
-      // مباشرة من بعد، نشيك ApplicantSelection
-      const redirected = await autoApplicantSelectionCheck();
-      if (redirected || __autoSequenceStop) {
-        // إذا 200 → autoApplicantSelectionCheck دار __autoSequenceStop = true
-        log("[CALENDRIA][DynSlots] Applicant 200 detected, stop remaining auto shots");
-        return;
-      }
-
-      if (index < seq.length && !__autoSequenceStop) {
-        setTimeout(fireOne, REPEAT_GAP_MS); // 1s بين كل طلب وطلب
+    for (let i = 0; i < repeat; i++) {
+      if (i === 0) {
+        // أول طلب: يستعمل الـ delay مع العد التنازلي في الزر
+        if (AUTO_DELAY_MS > 0) {
+          await new Promise(resolve => startInlineCountdownAlways(AUTO_DELAY_MS, resolve));
+        }
       } else {
-        log("[CALENDRIA][DynSlots] Auto sequence done (no more slots or stop flag)");
+        // الطلبات الإضافية: ننتظر REPEAT_GAP_MS فقط بدون عداد في الزر
+        if (REPEAT_GAP_MS > 0) {
+          await sleep(REPEAT_GAP_MS);
+        }
       }
-    };
 
-    fireOne();
+      if (SAMURAI_ALL_MODE) await postAllOpenSlotsAuto();
+      else await submitOneHour();
+    }
+
+    log("Auto sequence finished");
   }
 
   // =======================================================
@@ -1083,17 +990,10 @@
     }
 
     if (AUTO_ENABLED) {
-      startInlineCountdownAlways(AUTO_DELAY_MS, async () => {
-        if (SAMURAI_ALL_MODE) {
-          await postAllOpenSlotsAuto(); // "ALL mode" القديم
-        } else {
-          startAutoSequence(); // السيكوانس الجديد مع إيقاف عند 200
-        }
-      });
+      runAutoSequence().catch(e => warn("Auto sequence error", e));
     }
   }
 
   boot();
 
 })();
-
