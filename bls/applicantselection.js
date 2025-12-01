@@ -30,58 +30,42 @@
   // ==========================================================
   function playApplicantSoundOnce() {
     const p = location.pathname.toLowerCase();
-    // غير فـ applicantselection
     if (!p.includes("/mar/appointment/applicantselection")) return;
-
     if (window.__calendria_applicant_sound_played) return;
     window.__calendria_applicant_sound_played = true;
 
     try {
-      let src = null;
-
-      // ملف الصوت داخل ui/ في الإضافة
-      if (
-        typeof chrome !== "undefined" &&
-        chrome.runtime &&
-        typeof chrome.runtime.getURL === "function"
-      ) {
-        // غيّر الاسم هنا إذا سميتيه بشي حاجة أخرى (مثلا applicant.mp3)
+      let src;
+      if (chrome?.runtime?.getURL) {
+        // ملف الصوت داخل الإضافة: ui/pirate-sfx-2.mp3
         src = chrome.runtime.getURL("ui/pirate-sfx-2.mp3");
       } else {
-        // fallback بسيط إلا جربتيه برا الإضافة
         src = "pirate-sfx-2.mp3";
       }
 
       const audio = new Audio(src);
       audio.volume = 1.0;
-      audio.play().catch((e) => {
-        warn("Applicant sound autoplay blocked:", e);
-      });
-    } catch (e) {
-      warn("Applicant sound error:", e);
-    }
-  }
 
-  // =========================================
-  // CSS من الإضافة (applicant.css)
-  // =========================================
-  function injectCssOnce() {
-    if (document.getElementById("__cal_applicant_css")) return;
+      const tryPlay = () => {
+        audio.play().catch((e) => {
+          if (e && e.name === "NotAllowedError") {
+            // المتصفح منع autoplay → نستناو أول click من اليوزر
+            warn("Applicant sound autoplay blocked, waiting for first click");
+            const handler = () => {
+              audio.play().catch(err =>
+                warn("Sound play after click failed:", err)
+              );
+            };
+            document.addEventListener("click", handler, { once: true });
+          } else {
+            warn("Applicant sound error:", e);
+          }
+        });
+      };
 
-    try {
-      if (
-        typeof chrome !== "undefined" &&
-        chrome.runtime &&
-        typeof chrome.runtime.getURL === "function"
-      ) {
-        const link = document.createElement("link");
-        link.id = "__cal_applicant_css";
-        link.rel = "stylesheet";
-        link.href = chrome.runtime.getURL("applicant.css");
-        document.head.appendChild(link);
-      }
+      tryPlay();
     } catch (e) {
-      console.warn("[CALENDRIA][Applicant] CSS inject skipped:", e);
+      warn("Applicant sound global error:", e);
     }
   }
 
@@ -493,16 +477,15 @@
   // BOOT
   // ==========================================================
   function boot() {
-    injectCssOnce();
-
+    // CSS ديالك جاي من الـ CDN عبر background، ما نلمسوهش هنا
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", () => {
-        playApplicantSoundOnce();     // 🔊 الصوت هنا
+        playApplicantSoundOnce();   // 🔊
         injectBoxesWithMeta();
         autoSendPaymentVAS();
       });
     } else {
-      playApplicantSoundOnce();       // 🔊 وهنا إذا كانت الصفحة واجدة
+      playApplicantSoundOnce();     // 🔊
       injectBoxesWithMeta();
       autoSendPaymentVAS();
     }
