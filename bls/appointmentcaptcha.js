@@ -25,53 +25,6 @@
   let __cal_captcha_apikey = "";        // NoCaptchaAI apiKey
   let __captcha_settings_loaded = false;
 
-  // ⬅️ هادي دابا كتشغّل منطق واحد فقط حسب المود
-  function onCaptchaSettingsReady() {
-    __captcha_settings_loaded = true;
-
-    try {
-      if (__cal_captcha_mode === "nocaptchaai") {
-        console.log("[CALENDRIA][AppointmentCaptcha] Using NoCaptchaAI (button = ON)");
-        // NoCaptchaAI فقط
-        initNoCaptchaAppointmentIfEnabled();
-      } else {
-        console.log("[CALENDRIA][AppointmentCaptcha] Using AW8 (button = OFF)");
-        // AW8 فقط
-        initAw8AppointmentCaptcha();
-      }
-    } catch (e) {
-      console.warn("[CALENDRIA][AppointmentCaptcha] init error:", e);
-    }
-  }
-
-  // نقرؤوا الإعدادات مرة وحدة من الـ storage ديال الإضافة
-  try {
-    if (typeof chrome !== "undefined" && chrome.storage?.local) {
-      chrome.storage.local.get(
-        ["cal_captcha_mode", "cal_captcha_apikey"],
-        (res = {}) => {
-          __cal_captcha_mode  = res.cal_captcha_mode  || "aw8";
-          __cal_captcha_apikey = res.cal_captcha_apikey || "";
-
-          console.log(
-            "[CALENDRIA][AppointmentCaptcha][CAPTCHA] mode from popup =",
-            __cal_captcha_mode,
-            "apiKey.len=",
-            __cal_captcha_apikey.length
-          );
-
-          onCaptchaSettingsReady();
-        }
-      );
-    } else {
-      console.warn("[CALENDRIA][AppointmentCaptcha] chrome.storage.local not available, using defaults.");
-      onCaptchaSettingsReady();
-    }
-  } catch (e) {
-    console.warn("[CALENDRIA][AppointmentCaptcha] failed to read captcha mode/apikey:", e);
-    onCaptchaSettingsReady();
-  }
-
   // =========================
   // POST URL (الحقيقي)
   // =========================
@@ -79,7 +32,10 @@
 
   // Guard لتفادي multi-POST بنفس التوكن
   const LAST_TOKEN_KEY = "calendria_apptcap_last_token";
-  let __appt_state = "waiting";
+
+  // حالة إرسال الطلب (باش مانخربقوش بين waiting / preparing / sent)
+  let __appt_state = "waiting"; // waiting → preparing → sent
+
   // =========================
   // Delay config (from popup)
   // =========================
@@ -153,109 +109,112 @@
     return { token, data, clientData, codes };
   }
 
-    async function sendPOST(token, codes, data, clientData) {
-      try {
-        const body = new URLSearchParams();
-        body.set("__RequestVerificationToken", token);
-        body.set("SelectedImages", codes.join(","));
-        body.set("Data", data);
-        if (clientData) body.set("ClientData", clientData);
-  
-        let attempt = 0;
-        const MAX_TRIES = 20; // باش مانطيحوش ف لوب لا نهائي
-  
-        while (true) {
-          attempt++;
-          console.log(
-            "[CALENDRIA][AppointmentCaptcha] POST attempt #" + attempt,
-            { tokenPresent: !!token, dataLen: (data || "").length, codes }
-          );
-  
-          let resp;
-          try {
-            resp = await fetch(BASE_URL, {
-              method: "POST",
-              redirect: "manual",       // 🚫 ما يتبعش الريديركت أوتوماتيك
-              credentials: "same-origin",
-              headers: {
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-              },
-              body: body.toString(),
-            });
-          } catch (e) {
-            console.error("[CALENDRIA][AppointmentCaptcha] fetch error:", e);
-            break; // ميمكنش نكمّلو بلا ريسبونس
-          }
-  
-          const status = resp.status;
-          const locHeader = resp.headers.get("Location") || "";
-          // نبنيو link كامل إلا كان relative
-          const absLoc = locHeader
-            ? (locHeader.startsWith("http")
-                ? locHeader
-                : (location.origin + locHeader))
-            : "";
-  
-          console.log("[CALENDRIA][AppointmentCaptcha] resp:", {
-            status,
-            location: absLoc || "(none)",
+  // =========================
+  // إرسال POST مع مراقبة الريديركت (VisaType / NewAppointment)
+  // =========================
+  async function sendPOST(token, codes, data, clientData) {
+    try {
+      const body = new URLSearchParams();
+      body.set("__RequestVerificationToken", token);
+      body.set("SelectedImages", codes.join(","));
+      body.set("Data", data);
+      if (clientData) body.set("ClientData", clientData);
+
+      let attempt = 0;
+      const MAX_TRIES = 20; // باش مانطيحوش ف لوب لا نهائي
+
+      while (true) {
+        attempt++;
+        console.log(
+          "[CALENDRIA][AppointmentCaptcha] POST attempt #" + attempt,
+          { tokenPresent: !!token, dataLen: (data || "").length, codes }
+        );
+
+        let resp;
+        try {
+          resp = await fetch(BASE_URL, {
+            method: "POST",
+            redirect: "manual",       // 🚫 ما يتبعش الريديركت أوتوماتيك
+            credentials: "same-origin",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            },
+            body: body.toString(),
           });
-  
-          // 3xx + Location = محاولة ريديركت من السيرفر
-          if (status >= 300 && status < 400 && absLoc) {
-            const lower = absLoc.toLowerCase();
-  
-            // ====== حالة VisaType → تبع الريديركت وخرج من اللوب ======
-            if (lower.includes("/mar/appointment/visatype")) {
-              console.log(
-                "[CALENDRIA][AppointmentCaptcha] Redirect → VisaType, following:", 
-                absLoc
-              );
-              location.href = absLoc;
-              return;
-            }
-  
-            // ====== حالة NewAppointment?msg= → ما تمشيش، عاود POST ======
-            if (lower.includes("/mar/appointment/newappointment?msg=")) {
-              console.log(
-                "[CALENDRIA][AppointmentCaptcha] Redirect → NewAppointment?msg=, stay here & retry"
-              );
-  
-              if (attempt >= MAX_TRIES) {
-                console.warn(
-                  "[CALENDRIA][AppointmentCaptcha] Reached max attempts, stop retrying."
-                );
-                return;
-              }
-  
-              // نرتاحو شوية قبل ما نعاودو
-              await new Promise((r) => setTimeout(r, 500));
-              continue; // ↩️ نرجع لأول اللوب ونعيد نفس الطلب
-            }
-  
-            // ====== أي صفحة أخرى → تبعها عادي ======
+        } catch (e) {
+          console.error("[CALENDRIA][AppointmentCaptcha] fetch error:", e);
+          break; // ميمكنش نكمّلو بلا ريسبونس
+        }
+
+        const status = resp.status;
+        const locHeader = resp.headers.get("Location") || "";
+        const absLoc = locHeader
+          ? (locHeader.startsWith("http")
+              ? locHeader
+              : (location.origin + locHeader))
+          : "";
+
+        console.log("[CALENDRIA][AppointmentCaptcha] resp:", {
+          status,
+          location: absLoc || "(none)",
+        });
+
+        // 3xx + Location = محاولة ريديركت من السيرفر
+        if (status >= 300 && status < 400 && absLoc) {
+          const lower = absLoc.toLowerCase();
+
+          // ====== حالة VisaType → تبع الريديركت وخرج من اللوب ======
+          if (lower.includes("/mar/appointment/visatype")) {
             console.log(
-              "[CALENDRIA][AppointmentCaptcha] Redirect → other page, following:", 
+              "[CALENDRIA][AppointmentCaptcha] Redirect → VisaType, following:",
               absLoc
             );
             location.href = absLoc;
             return;
           }
-  
-          // إذا ما كانش ريديركت (200 ولا شي ستاتيس آخر) → نوقف، نبقى فصفحة الكابچا
+
+          // ====== حالة NewAppointment?msg= → ما تمشيش، عاود POST ======
+          if (lower.includes("/mar/appointment/newappointment?msg=")) {
+            console.log(
+              "[CALENDRIA][AppointmentCaptcha] Redirect → NewAppointment?msg=, stay here & retry"
+            );
+
+            if (attempt >= MAX_TRIES) {
+              console.warn(
+                "[CALENDRIA][AppointmentCaptcha] Reached max attempts, stop retrying."
+              );
+              return;
+            }
+
+            await new Promise((r) => setTimeout(r, 500));
+            continue; // ↩️ نرجع لأول اللوب ونعيد نفس الطلب
+          }
+
+          // ====== أي صفحة أخرى → تبعها عادي ======
           console.log(
-            "[CALENDRIA][AppointmentCaptcha] Non-redirect response (status = " +
-              status +
-              "), staying on page."
+            "[CALENDRIA][AppointmentCaptcha] Redirect → other page, following:",
+            absLoc
           );
+          location.href = absLoc;
           return;
         }
-      } catch (e) {
-        console.error("[CALENDRIA][AppointmentCaptcha] sendPOST outer error:", e);
+
+        // إذا ما كانش ريديركت (200 ولا شي ستاتيس آخر) → نوقف، نبقى فصفحة الكابچا
+        console.log(
+          "[CALENDRIA][AppointmentCaptcha] Non-redirect response (status = " +
+            status +
+            "), staying on page."
+        );
+        return;
       }
+    } catch (e) {
+      console.error("[CALENDRIA][AppointmentCaptcha] sendPOST outer error:", e);
     }
+  }
 
-
+  // =========================
+  // Loop يراقب الكابچا و يرسل POST مرة واحدة
+  // =========================
   function loopPostOnce() {
     if (__appt_state !== "waiting") {
       requestAnimationFrame(loopPostOnce);
@@ -287,33 +246,33 @@
         "s then POST (redirect only)"
     );
 
-        setTimeout(async () => {
-          if (__appt_state !== "preparing") {
-            requestAnimationFrame(loopPostOnce);
-            return;
-          }
-    
-          const fresh = buildBody();
-          if (
-            !fresh.token ||
-            !fresh.data ||
-            !fresh.codes.length ||
-            fresh.token !== token
-          ) {
-            console.warn(
-              "[CALENDRIA][AppointmentCaptcha] Conditions changed before POST, retry..."
-            );
-            __appt_state = "waiting";
-            requestAnimationFrame(loopPostOnce);
-            return;
-          }
-    
-          // حفظ آخر توكن باش مانعاودوش نفس الطلب من loopPostOnce
-          sessionStorage.setItem(LAST_TOKEN_KEY, fresh.token);
-    
-          __appt_state = "sent";
-          await sendPOST(fresh.token, fresh.codes, fresh.data, fresh.clientData);
-        }, PRE_DELAY_MS);
+    setTimeout(async () => {
+      if (__appt_state !== "preparing") {
+        requestAnimationFrame(loopPostOnce);
+        return;
+      }
+
+      const fresh = buildBody();
+      if (
+        !fresh.token ||
+        !fresh.data ||
+        !fresh.codes.length ||
+        fresh.token !== token
+      ) {
+        console.warn(
+          "[CALENDRIA][AppointmentCaptcha] Conditions changed before POST, retry..."
+        );
+        __appt_state = "waiting";
+        requestAnimationFrame(loopPostOnce);
+        return;
+      }
+
+      // حفظ آخر توكن باش مانعاودوش نفس الطلب من loopPostOnce
+      sessionStorage.setItem(LAST_TOKEN_KEY, fresh.token);
+
+      __appt_state = "sent";
+      await sendPOST(fresh.token, fresh.codes, fresh.data, fresh.clientData);
+    }, PRE_DELAY_MS);
 
     requestAnimationFrame(loopPostOnce);
   }
@@ -851,7 +810,50 @@
     new AppointmentCaptchaBot().start();
   }
 
+  // =========================
+  // CAPTCHA MODE bootstrap (بعد ما تجهز كلشي الفوق)
+  // =========================
+  function onCaptchaSettingsReady() {
+    __captcha_settings_loaded = true;
+
+    try {
+      if (__cal_captcha_mode === "nocaptchaai") {
+        console.log("[CALENDRIA][AppointmentCaptcha] Using NoCaptchaAI (button = ON)");
+        initNoCaptchaAppointmentIfEnabled();
+      } else {
+        console.log("[CALENDRIA][AppointmentCaptcha] Using AW8 (button = OFF)");
+        initAw8AppointmentCaptcha();
+      }
+    } catch (e) {
+      console.warn("[CALENDRIA][AppointmentCaptcha] init error:", e);
+    }
+  }
+
+  try {
+    if (typeof chrome !== "undefined" && chrome.storage?.local) {
+      chrome.storage.local.get(
+        ["cal_captcha_mode", "cal_captcha_apikey"],
+        (res = {}) => {
+          __cal_captcha_mode  = res.cal_captcha_mode  || "aw8";
+          __cal_captcha_apikey = res.cal_captcha_apikey || "";
+
+          console.log(
+            "[CALENDRIA][AppointmentCaptcha][CAPTCHA] mode from popup =",
+            __cal_captcha_mode,
+            "apiKey.len=",
+            __cal_captcha_apikey.length
+          );
+
+          onCaptchaSettingsReady();
+        }
+      );
+    } else {
+      console.warn("[CALENDRIA][AppointmentCaptcha] chrome.storage.local not available, using defaults.");
+      onCaptchaSettingsReady();
+    }
+  } catch (e) {
+    console.warn("[CALENDRIA][AppointmentCaptcha] failed to read captcha mode/apikey:", e);
+    onCaptchaSettingsReady();
+  }
+
 })();
-
-
-
