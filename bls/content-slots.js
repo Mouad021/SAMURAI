@@ -18,6 +18,9 @@
   // الفاصل بين الطلبات الإضافية (بعد الأولى) بالميلي ثانية
   const REPEAT_GAP_MS = 1000;
 
+  // فلاغ لإيقاف السكوانس إلى وصلنا 200 في ApplicantSelection
+  let __autoSequenceStop = false;
+
   function loadDelaySnapshot() {
     try {
       const snap = window.__SAMURAI_STORAGE || {};
@@ -291,7 +294,7 @@
       const after = raw.slice(idx + "appointmentdate=".length);
       return { prefix: raw.slice(0, idx + "appointmentdate=".length), suffix: after };
     }
-    return { prefix: raw + "&appointmentDate=", suffix: "" };
+    return { prefix: raw + "&appointmentDate=", "" };
   }
 
   function getAvailableDays(avail) {
@@ -751,6 +754,9 @@
         redirect: "manual"
       });
       if (res.status === 200) {
+        // ↙ هنا نوقف أي سكوانس أخرى (مايبقاش يبعث طلب ثاني/ثالث...)
+        __autoSequenceStop = true;
+
         clearAllToasts();
         showToast("rendez-vous reserved", "reserved", { persistent: true });
         window.location.href = url;
@@ -763,28 +769,45 @@
   // =======================================================
   // SUBMITS
   // =======================================================
-  async function submitOneHour() {
+  async function submitOneHour(slotIdOverride) {
     const form = document.querySelector("form") || document.body;
     const dateText = __dateEl?.value || __lastRandomDayText;
-    const slotId   = __selectedSlotId;
-
+    const chosenSlotId = slotIdOverride || __selectedSlotId;
+  
     await ensureStableNamesReady();
-
-    if (!dateText || !slotId) {
+  
+    if (!dateText || !chosenSlotId) {
       alert("اختار ساعة من البوكسات أولا");
       return;
     }
-
+  
     const slot =
-      __lastOpenSlots.find(s => String(s.Id) === String(slotId)) ||
-      { Id: slotId, Name: "", Count: null };
+      __lastOpenSlots.find(s => String(s.Id) === String(chosenSlotId)) ||
+      { Id: chosenSlotId, Name: "", Count: null };
+  
     saveLastSelection(dateText, slot);
-
+  
+    // نستعمل snapshotBasePayload + buildFormDataForSlot
     const { base, controls } = snapshotBasePayload(form);
-    const fd = buildFormDataForSlot({ dateText, slotId, base, controls, form });
-
-    await postSlotSelection(fd);
-    await autoApplicantSelectionCheck();
+    const fd = buildFormDataForSlot({
+      dateText,
+      slotId: chosenSlotId,
+      base,
+      controls,
+      form
+    });
+  
+    log("[DynSlots] FULL BUILT PAYLOAD OBJECT:", Object.fromEntries(fd.entries()));
+  
+    // إذا AUTO_ENABLED = false → نرسل مباشرة
+    // إذا AUTO_ENABLED = true → ننتظر AUTO_DELAY_MS
+    if (!AUTO_ENABLED || AUTO_DELAY_MS <= 0) {
+      await postSlotSelection(fd);
+    } else {
+      log("[DynSlots] waiting", AUTO_DELAY_MS, "ms before custom POST...");
+      await new Promise(r => setTimeout(r, AUTO_DELAY_MS));
+      await postSlotSelection(fd);
+    }
   }
 
   async function postAllOpenSlotsAuto() {
@@ -795,6 +818,11 @@
     await ensureStableNamesReady();
 
     for (let i = 0; i < __lastOpenSlots.length; i++) {
+      if (__autoSequenceStop) {
+        log("[CALENDRIA][DynSlots] auto sequence stopped (200 reached) during ALL mode");
+        return;
+      }
+
       const slot = __lastOpenSlots[i];
       const slotId = slot.Id;
 
@@ -928,28 +956,73 @@
   // =======================================================
   // AUTO SEQUENCE (delay + تكرار الطلبات)
   // =======================================================
-  async function runAutoSequence() {
-    const repeat = AUTO_REPEAT_COUNT || 1;
-    log("Auto sequence start. delay(ms):", AUTO_DELAY_MS, "repeat:", repeat);
+  // تبني لائحة slotIds مختلفة انطلاقاً من الساعة المختارة
+  function buildAutoSlotSequence(repeatCount) {
+    const slots = Array.isArray(__lastOpenSlots) ? __lastOpenSlots : [];
+    if (!slots.length || !__selectedSlotId) return [__selectedSlotId];
 
-    for (let i = 0; i < repeat; i++) {
-      if (i === 0) {
-        // أول طلب: يستعمل الـ delay مع العد التنازلي في الزر
-        if (AUTO_DELAY_MS > 0) {
-          await new Promise(resolve => startInlineCountdownAlways(AUTO_DELAY_MS, resolve));
-        }
-      } else {
-        // الطلبات الإضافية: ننتظر REPEAT_GAP_MS فقط بدون عداد في الزر
-        if (REPEAT_GAP_MS > 0) {
-          await sleep(REPEAT_GAP_MS);
-        }
-      }
+    const idx0 = slots.findIndex(s => String(s.Id) === String(__selectedSlotId));
+    if (idx0 < 0) return [__selectedSlotId];
 
-      if (SAMURAI_ALL_MODE) await postAllOpenSlotsAuto();
-      else await submitOneHour();
+    const max = Math.min(repeatCount, slots.length);
+    const seq = [];
+    for (let i = 0; i < max; i++) {
+      const idx = (idx0 + i) % slots.length; // يمشي للساعة اللي بعد وما يرجعش لنفس وحدة
+      seq.push(String(slots[idx].Id));
+    }
+    return seq;
+  }
+
+  // السيكوانس: أول طلب يخرج مباشرة (الـ delay مطبق داخل submitOneHour)
+  // والباقي كل واحد بعد REPEAT_GAP_MS، مع إلغاء الباقي إذا وصلنا 200
+  function startAutoSequence() {
+    if (!AUTO_ENABLED) {
+      log("[CALENDRIA][DynSlots] Auto mode disabled");
+      return;
     }
 
-    log("Auto sequence finished");
+    __autoSequenceStop = false; // نرجعوها false فكل تشغيل جديد
+
+    const repeat = Math.max(1, AUTO_REPEAT_COUNT || 1);
+    const seq = buildAutoSlotSequence(repeat);
+
+    log("[CALENDRIA][DynSlots] Auto sequence (no wait here) repeat:", seq.length);
+
+    let index = 0;
+
+    const fireOne = async () => {
+      if (__autoSequenceStop) {
+        log("[CALENDRIA][DynSlots] Auto sequence stopped (flag=true) before shot");
+        return;
+      }
+
+      if (index >= seq.length) {
+        log("[CALENDRIA][DynSlots] Auto sequence finished (all shots done)");
+        return;
+      }
+
+      const sid = seq[index++];
+      log("[CALENDRIA][DynSlots] Auto shot", index, "slotId:", sid);
+
+      // نرسل الطلب لهاد الساعة
+      await submitOneHour(sid);
+
+      // مباشرة من بعد، نشيك ApplicantSelection
+      const redirected = await autoApplicantSelectionCheck();
+      if (redirected || __autoSequenceStop) {
+        // إذا 200 → autoApplicantSelectionCheck دار __autoSequenceStop = true
+        log("[CALENDRIA][DynSlots] Applicant 200 detected, stop remaining auto shots");
+        return;
+      }
+
+      if (index < seq.length && !__autoSequenceStop) {
+        setTimeout(fireOne, REPEAT_GAP_MS); // 1s بين كل طلب وطلب
+      } else {
+        log("[CALENDRIA][DynSlots] Auto sequence done (no more slots or stop flag)");
+      }
+    };
+
+    fireOne();
   }
 
   // =======================================================
@@ -990,7 +1063,13 @@
     }
 
     if (AUTO_ENABLED) {
-      runAutoSequence().catch(e => warn("Auto sequence error", e));
+      startInlineCountdownAlways(AUTO_DELAY_MS, async () => {
+        if (SAMURAI_ALL_MODE) {
+          await postAllOpenSlotsAuto(); // "ALL mode" القديم
+        } else {
+          startAutoSequence(); // السيكوانس الجديد مع إيقاف عند 200
+        }
+      });
     }
   }
 
