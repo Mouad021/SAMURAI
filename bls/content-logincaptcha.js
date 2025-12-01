@@ -18,6 +18,52 @@
   let __cal_captcha_mode = "aw8";       // "aw8" | "nocaptchaai"
   let __cal_captcha_apikey = "";        // NoCaptchaAI apiKey
   let __captcha_settings_loaded = false;
+  let __dom_ready = false;
+
+  function startSolversAccordingToMode() {
+    if (!__captcha_settings_loaded || !__dom_ready) return;
+
+    console.log(
+      "[CALENDRIA][LoginCaptcha] startSolversAccordingToMode -> mode=",
+      __cal_captcha_mode
+    );
+
+    if (__cal_captcha_mode === "nocaptchaai") {
+      initNoCaptchaLoginIfEnabled();
+      return;
+    }
+
+    if (__cal_captcha_mode === "aw8") {
+      initAw8LoginCaptcha();
+      return;
+    }
+
+    // fallback الافتراضي: نخلي AW8
+    initAw8LoginCaptcha();
+  }
+
+  try {
+    if (typeof chrome !== "undefined" && chrome.storage?.local) {
+      chrome.storage.local.get(
+        ["cal_captcha_mode", "cal_captcha_apikey"],
+        (res = {}) => {
+          __cal_captcha_mode = res.cal_captcha_mode || "aw8";
+          __cal_captcha_apikey = res.cal_captcha_apikey || "";
+          console.log(
+            "[CALENDRIA][CAPTCHA] mode =",
+            __cal_captcha_mode,
+            "apiKey.len=",
+            __cal_captcha_apikey.length
+          );
+          __captcha_settings_loaded = true;
+          startSolversAccordingToMode();
+        }
+      );
+    }
+  } catch (e) {
+    console.warn("[CALENDRIA][CAPTCHA] failed to read captcha mode/apikey:", e);
+    __captcha_settings_loaded = true;
+  }
 
   // ==============================
   // DELAY CONFIG (LoginCaptcha)
@@ -26,7 +72,11 @@
   let LOGIN_CAPTCHA_DELAY_MS = 0;
 
   try {
-    if (typeof chrome !== "undefined" && chrome.storage?.local) {
+    if (
+      typeof chrome !== "undefined" &&
+      chrome.storage &&
+      chrome.storage.local
+    ) {
       chrome.storage.local.get(
         ["calendria_use_delays", "calendria_delay_logincaptcha"],
         (res = {}) => {
@@ -49,9 +99,6 @@
     console.warn("[CALENDRIA][LoginCaptcha] delay config error:", e);
   }
 
-  // ==============================
-  // Helpers (form / password / fields)
-  // ==============================
   function getCaptchaForm() {
     return (
       document.querySelector('form[action*="logincaptchasubmit"]') ||
@@ -252,7 +299,7 @@
   }
 
   // =====================================================
-  //  إرسال LoginCaptcha عبر FETCH (بدون تداخل مع السولفرات)
+  //  إرسال LoginCaptcha عبر FETCH
   // =====================================================
   async function sendLoginCaptchaFetch(passwordValue) {
     console.log("[CALENDRIA][CAPTCHA] sendLoginCaptchaFetch START");
@@ -331,31 +378,28 @@
         "abs:",
         absLoc
       );
-
-      // 0 / opaqueredirect → نجاح، مشي مباشرة لـ NewAppointment
       if (resp.type === "opaqueredirect" || resp.status === 0) {
         console.log("[CALENDRIA][CAPTCHA] opaqueredirect/0 => treat as success");
         window.location.href = NEW_APPOINTMENT_URL;
         return;
       }
 
-      // 3xx بدون Location → إعادة تحميل نفس الصفحة
-      if ((resp.status === 302 || resp.status === 301) && !loc) {
-        console.warn("[CALENDRIA][CAPTCHA] 302 بدون Location => retry");
+      if (resp.status === 302 || resp.status === 301) {
+        if (!loc) {
+          console.warn("[CALENDRIA][CAPTCHA] 302 بدون Location => retry");
+          window.__calendria_loginCaptcha_fetchSent = false;
+          location.replace(location.href);
+          return;
+        }
+      }
+
+      if (absLocLower.includes("/mar/newcaptcha/logincaptcha")) {
+        console.warn("[CALENDRIA][CAPTCHA] Wrong captcha => retry");
         window.__calendria_loginCaptcha_fetchSent = false;
         location.replace(location.href);
         return;
       }
 
-      // Wrong captcha → LoginCaptcha?data=
-      if (absLocLower.includes("/mar/newcaptcha/logincaptcha?data=")) {
-        console.warn("[CALENDRIA][CAPTCHA] Wrong captcha => retry");
-        window.__calendria_loginCaptcha_fetchSent = false;
-        window.location.href = absLoc;
-        return;
-      }
-
-      // نجاح → redirect للـ root
       const originLower = location.origin.toLowerCase();
       if (
         absLocLower === originLower ||
@@ -370,14 +414,13 @@
         return;
       }
 
-      // أي redirect آخر → نتبعو عادي
       if (resp.status === 302 || resp.status === 301) {
-        console.log("[CALENDRIA][CAPTCHA] Redirect to:", absLoc);
-        window.location.href = absLoc;
+        const target = absLoc || new URL(loc, location.origin).toString();
+        console.log("[CALENDRIA][CAPTCHA] Redirect to:", target);
+        window.location.href = target;
         return;
       }
 
-      // 200 → يا إما غلط ف الكابتشا يا إما نجاح
       if (resp.status === 200) {
         const text = await resp.text();
 
@@ -605,10 +648,8 @@
   }
 
   // ==============================
-  // AW8 SOLVER
+  // AW8 SOLVER (LOGIN) - IMAGES ONLY
   // ==============================
-  let initAw8LoginCaptcha;
-
   (function () {
     "use strict";
 
@@ -621,6 +662,24 @@
         this._backoffMax = 2500;
         this._imgB64Cache = new WeakMap();
         this._appliedSolve = false;
+      }
+
+      _showCaptchaError(msg) {
+        const escapeHtml = (s) =>
+          String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+        const container = document.querySelector(".main-div-container");
+        if (!container) return;
+        let errorDiv = document.getElementById("captcha-error-banner");
+        if (!errorDiv) {
+          errorDiv = document.createElement("div");
+          errorDiv.id = "captcha-error-banner";
+          errorDiv.className =
+            "d-flex align-items-center justify-content-center lead text-danger";
+          container.prepend(errorDiv);
+        }
+        errorDiv.innerHTML = `<span class="spinner-grow"></span>&nbsp;Error: ${escapeHtml(
+          msg
+        )} — retrying...`;
       }
 
       _sleep(ms) { return new Promise((res) => setTimeout(res, ms)); }
@@ -713,9 +772,41 @@
           .filter(Boolean);
       }
 
-      async solveCaptchaAndSubmit() {
+      setupCommonUI({ client, tweakLayout = true } = {}) {
+        try {
+          if (typeof checkAndReloadOnCaptchaLimit === "function")
+            checkAndReloadOnCaptchaLimit();
+        } catch {}
+
+        const overlay = document.querySelector(".global-overlay");
+        if (overlay) overlay.style.backgroundColor = "rgba(0,0,0,0.3)";
+
+        if (tweakLayout) {
+          document
+            .querySelectorAll("body > .row > [class^='col-']")
+            .forEach((el) => (el.style.display = "none"));
+        }
+
+        if (client?.name || this.contextName) {
+          document.title = client?.name || this.contextName;
+        }
+
+        let loadingEl;
+        const mainContainer = document.querySelector(".main-div-container");
+        if (mainContainer) {
+          loadingEl = document.createElement("div");
+          loadingEl.className =
+            "d-flex align-items-center justify-content-center lead text-warning";
+          loadingEl.innerHTML =
+            '<span class="spinner-grow"></span>&nbsp;Solving captcha ...';
+          mainContainer.insertBefore(loadingEl, mainContainer.firstChild);
+        }
+        return loadingEl;
+      }
+
+      async solveCaptchaAndSelectImagesOnly() {
         const REGISTRY_URL = "https://aw8.onrender.com/api/get";
-        const CACHE_KEY = "aw8_server_url_login";
+        const CACHE_KEY = "aw8_server_url";
 
         const storage = {
           async get(k) {
@@ -756,41 +847,14 @@
         const trySolveAt = async (baseUrl, target, base64Images) => {
           const url = baseUrl.replace(/\/+$/, "") + "/solve";
 
-          if (globalThis.chrome?.runtime?.id) {
-            return await new Promise((resolve, reject) => {
-              let done = false;
-              const killer = setTimeout(() => {
-                if (!done) {
-                  done = true;
-                  reject(new Error("BG fetch hard timeout"));
-                }
-              }, 16000);
-
-              chrome.runtime.sendMessage(
-                { type: "aw8_solve", url, payload: { target, images: base64Images }, timeout: 15000 },
-                (resp) => {
-                  clearTimeout(killer);
-                  if (done) return;
-                  done = true;
-
-                  if (chrome.runtime.lastError)
-                    return reject(new Error(chrome.runtime.lastError.message));
-                  if (!resp) return reject(new Error("No response from background"));
-                  if (!resp.ok)
-                    return reject(new Error(`HTTP ${resp.status || "ERR"}`));
-
-                  try { resolve(JSON.parse(resp.body)); }
-                  catch { reject(new Error("Invalid JSON from background")); }
-                }
-              );
-            });
-          }
-
           const resp = await this._fetchWithTimeout(
             url,
             {
               method: "POST",
-              headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "1" },
+              headers: {
+                "Content-Type": "application/json",
+                "ngrok-skip-browser-warning": "1",
+              },
               body: JSON.stringify({ target, images: base64Images }),
             },
             15000
@@ -801,8 +865,8 @@
 
         const clickMatchesOnly = (grid, data, target) => {
           if (this._appliedSolve) return;
-          let matches = null;
 
+          let matches = null;
           if (Array.isArray(data)) matches = data;
           else if (data?.matches) matches = data.matches;
           else if (data?.status === "solved" && data.solution) {
@@ -833,12 +897,22 @@
             }
 
             const target = this.getCaptchaTarget();
-            if (!target) { await this._backoff(); continue; }
+            if (!target) {
+              this._showCaptchaError("No target number found");
+              await this._backoff();
+              continue;
+            }
 
             const grid = this.getCaptchaGrid();
-            if (!grid.length) { await this._backoff(); continue; }
+            if (!grid.length) {
+              this._showCaptchaError("No captcha images found");
+              await this._backoff();
+              continue;
+            }
 
-            const base64Images = await Promise.all(grid.map((img) => this._imgToBase64(img)));
+            const base64Images = await Promise.all(
+              grid.map((img) => this._imgToBase64(img))
+            );
 
             const cached = await storage.get(CACHE_KEY);
             if (cached) {
@@ -871,8 +945,16 @@
             }
 
             if (solved) break;
+            this._showCaptchaError("AW8 error: no reachable solver (WAN/LAN)");
             await this._backoff();
           } catch (e) {
+            console.error(
+              "[💥] solve attempt failed [" + this.contextName + "]:",
+              e
+            );
+            this._showCaptchaError(
+              e && e.message ? e.message : String(e)
+            );
             await this._backoff();
           }
         }
@@ -886,19 +968,13 @@
       }
 
       async start() {
-        const mainContainer = document.querySelector(".main-div-container");
-        let loadingEl;
-        if (mainContainer) {
-          loadingEl = document.createElement("div");
-          loadingEl.className =
-            "d-flex align-items-center justify-content-center lead text-warning";
-          loadingEl.innerHTML =
-            '<span class="spinner-grow"></span>&nbsp;Solving captcha ...';
-          mainContainer.insertBefore(loadingEl, mainContainer.firstChild);
-        }
+        const loadingEl = this.setupCommonUI({
+          client: this.client,
+          tweakLayout: true,
+        });
 
         try {
-          await this.solveCaptchaAndSubmit();
+          await this.solveCaptchaAndSelectImagesOnly();
           loadingEl?.remove();
         } catch {
           loadingEl?.remove();
@@ -914,7 +990,8 @@
       return re.test(cleaned);
     }
 
-    initAw8LoginCaptcha = function initAw8LoginCaptchaInner() {
+    // نخلي initAw8LoginCaptcha global باش نتحكم فيه حسب المود
+    window.initAw8LoginCaptcha = function initAw8LoginCaptchaInner() {
       if (__cal_captcha_mode === "nocaptchaai") {
         console.log("[AW8][Login] Skipped because mode = NoCaptchaAI");
         return;
@@ -952,65 +1029,18 @@
   }
 
   // ======================
-  // اختيار السولفر حسب الزر
+  // START ALL
   // ======================
-  function startSolversAccordingToMode() {
-    if (!__captcha_settings_loaded) return;
-
-    const runner = () => {
-      if (__cal_captcha_mode === "nocaptchaai") {
-        console.log("[CALENDRIA][LoginCaptcha] Using NoCaptchaAI (button = ON)");
-        initNoCaptchaLoginIfEnabled();
-      } else {
-        console.log("[CALENDRIA][LoginCaptcha] Using AW8 (button = OFF)");
-        initAw8LoginCaptcha();
-      }
-    };
-
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", runner, { once: true });
-    } else {
-      runner();
-    }
-  }
-
-  // ======================
-  // قراءة المود من storage
-  // ======================
-  try {
-    if (typeof chrome !== "undefined" && chrome.storage?.local) {
-      chrome.storage.local.get(
-        ["cal_captcha_mode", "cal_captcha_apikey"],
-        (res = {}) => {
-          __cal_captcha_mode = res.cal_captcha_mode || "aw8";
-          __cal_captcha_apikey = res.cal_captcha_apikey || "";
-          __captcha_settings_loaded = true;
-
-          console.log(
-            "[CALENDRIA][CAPTCHA] mode from popup =",
-            __cal_captcha_mode,
-            "apiKey.len=",
-            __cal_captcha_apikey.length
-          );
-
-          startSolversAccordingToMode();
-        }
-      );
-    } else {
-      console.warn(
-        "[CALENDRIA][CAPTCHA] chrome.storage.local not available, using defaults."
-      );
-      __captcha_settings_loaded = true;
-      startSolversAccordingToMode();
-    }
-  } catch (e) {
-    console.warn("[CALENDRIA][CAPTCHA] failed to read captcha mode/apikey:", e);
-    __captcha_settings_loaded = true;
+  function markDomReadyAndMaybeStartSolvers() {
+    __dom_ready = true;
     startSolversAccordingToMode();
   }
 
-  // ======================
-  // START PASSWORD / WATCHER
-  // ======================
   waitAndInit();
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", markDomReadyAndMaybeStartSolvers);
+  } else {
+    markDomReadyAndMaybeStartSolvers();
+  }
 })();
