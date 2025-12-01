@@ -79,7 +79,7 @@
 
   // Guard لتفادي multi-POST بنفس التوكن
   const LAST_TOKEN_KEY = "calendria_apptcap_last_token";
-
+  let __appt_state = "waiting";
   // =========================
   // Delay config (from popup)
   // =========================
@@ -852,5 +852,6 @@
   }
 
 })();
+
 
 
