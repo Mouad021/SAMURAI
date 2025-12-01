@@ -25,6 +25,43 @@
     console.warn("[CALENDRIA][ApplicantInfo]", ...a);
   }
 
+  // ==========================================================
+  // SOUND ONLY ON APPLICANT PAGE
+  // ==========================================================
+  function playApplicantSoundOnce() {
+    const p = location.pathname.toLowerCase();
+    // غير فـ applicantselection
+    if (!p.includes("/mar/appointment/applicantselection")) return;
+
+    if (window.__calendria_applicant_sound_played) return;
+    window.__calendria_applicant_sound_played = true;
+
+    try {
+      let src = null;
+
+      // ملف الصوت داخل ui/ في الإضافة
+      if (
+        typeof chrome !== "undefined" &&
+        chrome.runtime &&
+        typeof chrome.runtime.getURL === "function"
+      ) {
+        // غيّر الاسم هنا إذا سميتيه بشي حاجة أخرى (مثلا applicant.mp3)
+        src = chrome.runtime.getURL("ui/pirate-sfx-2.mp3");
+      } else {
+        // fallback بسيط إلا جربتيه برا الإضافة
+        src = "pirate-sfx-2.mp3";
+      }
+
+      const audio = new Audio(src);
+      audio.volume = 1.0;
+      audio.play().catch((e) => {
+        warn("Applicant sound autoplay blocked:", e);
+      });
+    } catch (e) {
+      warn("Applicant sound error:", e);
+    }
+  }
+
   // =========================================
   // CSS من الإضافة (applicant.css)
   // =========================================
@@ -460,10 +497,12 @@
 
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", () => {
+        playApplicantSoundOnce();     // 🔊 الصوت هنا
         injectBoxesWithMeta();
         autoSendPaymentVAS();
       });
     } else {
+      playApplicantSoundOnce();       // 🔊 وهنا إذا كانت الصفحة واجدة
       injectBoxesWithMeta();
       autoSendPaymentVAS();
     }
