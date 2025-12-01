@@ -109,32 +109,25 @@
     return { token, data, clientData, codes };
   }
 
-  // =========================
-  // إرسال POST مع مراقبة الريديركت (VisaType / NewAppointment)
-  // =========================
-  async function sendPOST(token, codes, data, clientData) {
-    try {
-      const body = new URLSearchParams();
-      body.set("__RequestVerificationToken", token);
-      body.set("SelectedImages", codes.join(","));
-      body.set("Data", data);
-      if (clientData) body.set("ClientData", clientData);
-
-      let attempt = 0;
-      const MAX_TRIES = 20; // باش مانطيحوش ف لوب لا نهائي
-
-      while (true) {
-        attempt++;
-        console.log(
-          "[CALENDRIA][AppointmentCaptcha] POST attempt #" + attempt,
-          { tokenPresent: !!token, dataLen: (data || "").length, codes }
-        );
-
+    async function sendPOST(token, codes, data, clientData) {
+      try {
+        const body = new URLSearchParams();
+        body.set("__RequestVerificationToken", token);
+        body.set("SelectedImages", codes.join(","));
+        body.set("Data", data);
+        if (clientData) body.set("ClientData", clientData);
+    
+        console.log("[CALENDRIA][AppointmentCaptcha] POST →", BASE_URL, {
+          tokenPresent: !!token,
+          dataLen: (data || "").length,
+          codes,
+        });
+    
         let resp;
         try {
           resp = await fetch(BASE_URL, {
             method: "POST",
-            redirect: "manual",       // 🚫 ما يتبعش الريديركت أوتوماتيك
+            redirect: "manual",          // مهم باش مانتبعوش الريديركت بوحدو
             credentials: "same-origin",
             headers: {
               "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
@@ -143,54 +136,45 @@
           });
         } catch (e) {
           console.error("[CALENDRIA][AppointmentCaptcha] fetch error:", e);
-          break; // ميمكنش نكمّلو بلا ريسبونس
+          return;
         }
-
-        const status = resp.status;
+    
+        const status    = resp.status;
         const locHeader = resp.headers.get("Location") || "";
         const absLoc = locHeader
           ? (locHeader.startsWith("http")
               ? locHeader
               : (location.origin + locHeader))
           : "";
-
+    
         console.log("[CALENDRIA][AppointmentCaptcha] resp:", {
           status,
           location: absLoc || "(none)",
         });
-
-        // 3xx + Location = محاولة ريديركت من السيرفر
+    
         if (status >= 300 && status < 400 && absLoc) {
           const lower = absLoc.toLowerCase();
-
-          // ====== حالة VisaType → تبع الريديركت وخرج من اللوب ======
+    
+          // 1) إلى كان رايح لفيزا تايب → دخل مباشرة
           if (lower.includes("/mar/appointment/visatype")) {
             console.log(
-              "[CALENDRIA][AppointmentCaptcha] Redirect → VisaType, following:",
+              "[CALENDRIA][AppointmentCaptcha] Redirect → VisaType, GO!",
               absLoc
             );
-            location.href = absLoc;
+            location.href = absLoc;   // ⬅️ هنا غادي يدخـل لصفحة VisaType
             return;
           }
-
-          // ====== حالة NewAppointment?msg= → ما تمشيش، عاود POST ======
+    
+          // 2) إلى كان NewAppointment?msg= → رجّع NewAppointment نظيفة
           if (lower.includes("/mar/appointment/newappointment?msg=")) {
             console.log(
-              "[CALENDRIA][AppointmentCaptcha] Redirect → NewAppointment?msg=, stay here & retry"
+              "[CALENDRIA][AppointmentCaptcha] Redirect → NewAppointment?msg=, reload clean /NewAppointment"
             );
-
-            if (attempt >= MAX_TRIES) {
-              console.warn(
-                "[CALENDRIA][AppointmentCaptcha] Reached max attempts, stop retrying."
-              );
-              return;
-            }
-
-            await new Promise((r) => setTimeout(r, 500));
-            continue; // ↩️ نرجع لأول اللوب ونعيد نفس الطلب
+            location.href = "/MAR/appointment/newappointment";
+            return;
           }
-
-          // ====== أي صفحة أخرى → تبعها عادي ======
+    
+          // 3) أي صفحة أخرى → تبعها عادي
           console.log(
             "[CALENDRIA][AppointmentCaptcha] Redirect → other page, following:",
             absLoc
@@ -198,19 +182,19 @@
           location.href = absLoc;
           return;
         }
-
-        // إذا ما كانش ريديركت (200 ولا شي ستاتيس آخر) → نوقف، نبقى فصفحة الكابچا
+    
+        // ماكانش ريديركت → نبقاو فصفحة الكابچا
         console.log(
           "[CALENDRIA][AppointmentCaptcha] Non-redirect response (status = " +
             status +
             "), staying on page."
         );
-        return;
+      } catch (e) {
+        console.error("[CALENDRIA][AppointmentCaptcha] sendPOST outer error:", e);
       }
-    } catch (e) {
-      console.error("[CALENDRIA][AppointmentCaptcha] sendPOST outer error:", e);
     }
-  }
+
+
 
   // =========================
   // Loop يراقب الكابچا و يرسل POST مرة واحدة
@@ -857,3 +841,4 @@
   }
 
 })();
+
