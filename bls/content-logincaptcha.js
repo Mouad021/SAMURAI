@@ -252,35 +252,35 @@
   }
 
   // =====================================================
-  //  إرسال LoginCaptcha عبر FETCH
+  //  إرسال LoginCaptcha عبر FETCH (بدون تداخل مع السولفرات)
   // =====================================================
   async function sendLoginCaptchaFetch(passwordValue) {
     console.log("[CALENDRIA][CAPTCHA] sendLoginCaptchaFetch START");
-  
+
     const form = getCaptchaForm();
     if (!form) return;
-  
+
     const codes = getSelectedImageCodes();
     if (!codes.length) {
       console.warn("[CALENDRIA][CAPTCHA] No selected images, abort fetch.");
       return;
     }
     const selectedStr = codes.join(",");
-  
+
     const token =
       form.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
     const idVal = form.querySelector('input[name="Id"]')?.value || "";
     const returnUrl = form.querySelector('input[name="ReturnUrl"]')?.value || "";
     const paramVal = form.querySelector('input[name="Param"]')?.value || "";
-  
+
     const captchaTextVal =
       form.querySelector('input[name="CaptchaText"]')?.value ||
       form.querySelector("#CaptchaText")?.value ||
       "";
-  
+
     const idNameList = extractFieldNamesOrdered();
     const responseData = buildResponseData(idNameList);
-  
+
     const body = new URLSearchParams();
     body.append("SelectedImages", selectedStr);
     body.append("Id", idVal);
@@ -289,10 +289,10 @@
     body.append("Param", paramVal);
     body.append("CaptchaText", captchaTextVal);
     if (token) body.append("__RequestVerificationToken", token);
-  
+
     const NEW_APPOINTMENT_URL =
       "https://www.blsspainmorocco.net/MAR/appointment/newappointment";
-  
+
     try {
       const resp = await fetch("/MAR/NewCaptcha/LoginCaptchaSubmit", {
         method: "POST",
@@ -305,10 +305,10 @@
         },
         body: body.toString(),
       });
-  
+
       const locRaw = resp.headers.get("Location") || "";
       const loc = locRaw.trim();
-  
+
       let absLoc = "";
       let absLocLower = "";
       if (loc) {
@@ -320,7 +320,7 @@
           absLocLower = loc.toLowerCase();
         }
       }
-  
+
       console.log(
         "[CALENDRIA][CAPTCHA] status:",
         resp.status,
@@ -331,39 +331,31 @@
         "abs:",
         absLoc
       );
-  
-      // =========================
-      // 0 / opaqueredirect → treat as success
-      // =========================
+
+      // 0 / opaqueredirect → نجاح، مشي مباشرة لـ NewAppointment
       if (resp.type === "opaqueredirect" || resp.status === 0) {
         console.log("[CALENDRIA][CAPTCHA] opaqueredirect/0 => treat as success");
         window.location.href = NEW_APPOINTMENT_URL;
         return;
       }
-  
-      // =========================
-      // 3xx بدون Location → reload
-      // =========================
+
+      // 3xx بدون Location → إعادة تحميل نفس الصفحة
       if ((resp.status === 302 || resp.status === 301) && !loc) {
         console.warn("[CALENDRIA][CAPTCHA] 302 بدون Location => retry");
         window.__calendria_loginCaptcha_fetchSent = false;
         location.replace(location.href);
         return;
       }
-  
-      // =========================
+
       // Wrong captcha → LoginCaptcha?data=
-      // =========================
       if (absLocLower.includes("/mar/newcaptcha/logincaptcha?data=")) {
         console.warn("[CALENDRIA][CAPTCHA] Wrong captcha => retry");
         window.__calendria_loginCaptcha_fetchSent = false;
-        location.href = absLoc;
+        window.location.href = absLoc;
         return;
       }
-  
-      // =========================
-      // Success → redirect to site root
-      // =========================
+
+      // نجاح → redirect للـ root
       const originLower = location.origin.toLowerCase();
       if (
         absLocLower === originLower ||
@@ -377,34 +369,30 @@
         window.location.href = NEW_APPOINTMENT_URL;
         return;
       }
-  
-      // =========================
-      // Other redirect → follow normally
-      // =========================
+
+      // أي redirect آخر → نتبعو عادي
       if (resp.status === 302 || resp.status === 301) {
         console.log("[CALENDRIA][CAPTCHA] Redirect to:", absLoc);
         window.location.href = absLoc;
         return;
       }
-  
-      // =========================
-      // 200 → success or wrong captcha
-      // =========================
+
+      // 200 → يا إما غلط ف الكابتشا يا إما نجاح
       if (resp.status === 200) {
         const text = await resp.text();
-  
+
         if (/logincaptcha|captcha/i.test(text)) {
           console.warn("[CALENDRIA][CAPTCHA] Wrong captcha (200 body) => retry");
           window.__calendria_loginCaptcha_fetchSent = false;
           location.replace(location.href);
           return;
         }
-  
+
         console.log("[CALENDRIA][CAPTCHA] Success (200) => go NewAppointment");
         window.location.href = NEW_APPOINTMENT_URL;
         return;
       }
-  
+
       console.warn("[CALENDRIA][CAPTCHA] Unexpected status:", resp.status);
       window.__calendria_loginCaptcha_fetchSent = false;
     } catch (e) {
@@ -412,7 +400,6 @@
       window.__calendria_loginCaptcha_fetchSent = false;
     }
   }
-
 
   // =============================================
   // Auto watcher: يراقب اختيار الصور + الباسوورد
@@ -620,7 +607,7 @@
   // ==============================
   // AW8 SOLVER
   // ==============================
-  let initAw8LoginCaptcha; // سنملؤها داخل IIFE
+  let initAw8LoginCaptcha;
 
   (function () {
     "use strict";
@@ -634,24 +621,6 @@
         this._backoffMax = 2500;
         this._imgB64Cache = new WeakMap();
         this._appliedSolve = false;
-      }
-
-      _showCaptchaError(msg) {
-        const escapeHtml = (s) =>
-          String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-        const container = document.querySelector(".main-div-container");
-        if (!container) return;
-        let errorDiv = document.getElementById("captcha-error-banner");
-        if (!errorDiv) {
-          errorDiv = document.createElement("div");
-          errorDiv.id = "captcha-error-banner";
-          errorDiv.className =
-            "d-flex align-items-center justify-content-center lead text-danger";
-          container.prepend(errorDiv);
-        }
-        errorDiv.innerHTML = `<span class="spinner-grow"></span>&nbsp;Error: ${escapeHtml(
-          msg
-        )} — retrying...`;
       }
 
       _sleep(ms) { return new Promise((res) => setTimeout(res, ms)); }
@@ -742,38 +711,6 @@
           })
           .map((el) => el.querySelector(".captcha-img"))
           .filter(Boolean);
-      }
-
-      setupCommonUI({ client, tweakLayout = true } = {}) {
-        try {
-          if (typeof checkAndReloadOnCaptchaLimit === "function")
-            checkAndReloadOnCaptchaLimit();
-        } catch {}
-
-        const overlay = document.querySelector(".global-overlay");
-        if (overlay) overlay.style.backgroundColor = "rgba(0,0,0,0.3)";
-
-        if (tweakLayout) {
-          document
-            .querySelectorAll("body > .row > [class^='col-']")
-            .forEach((el) => (el.style.display = "none"));
-        }
-
-        if (client?.name || this.contextName) {
-          document.title = client?.name || this.contextName;
-        }
-
-        let loadingEl;
-        const mainContainer = document.querySelector(".main-div-container");
-        if (mainContainer) {
-          loadingEl = document.createElement("div");
-          loadingEl.className =
-            "d-flex align-items-center justify-content-center lead text-warning";
-          loadingEl.innerHTML =
-            '<span class="spinner-grow"></span>&nbsp;Solving captcha ...';
-          mainContainer.insertBefore(loadingEl, mainContainer.firstChild);
-        }
-        return loadingEl;
       }
 
       async solveCaptchaAndSubmit() {
@@ -949,10 +886,16 @@
       }
 
       async start() {
-        const loadingEl = this.setupCommonUI({
-          client: this.client,
-          tweakLayout: true,
-        });
+        const mainContainer = document.querySelector(".main-div-container");
+        let loadingEl;
+        if (mainContainer) {
+          loadingEl = document.createElement("div");
+          loadingEl.className =
+            "d-flex align-items-center justify-content-center lead text-warning";
+          loadingEl.innerHTML =
+            '<span class="spinner-grow"></span>&nbsp;Solving captcha ...';
+          mainContainer.insertBefore(loadingEl, mainContainer.firstChild);
+        }
 
         try {
           await this.solveCaptchaAndSubmit();
@@ -1032,7 +975,7 @@
   }
 
   // ======================
-  // قراءة المود من storage (في الأخير بعد تعريف كلشي)
+  // قراءة المود من storage
   // ======================
   try {
     if (typeof chrome !== "undefined" && chrome.storage?.local) {
