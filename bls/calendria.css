@@ -361,6 +361,17 @@ main .card-header h5 {
   border-color: rgba(148, 163, 184, 0.6);
   cursor: pointer;
   opacity: .95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 120px;
+}
+
+/* شكل الـ countdown فحالة OFF / disabled */
+.cal-countdown[disabled] {
+  opacity: .6;
+  cursor: default;
+  box-shadow: none;
 }
 
 /* ============================
