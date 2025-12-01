@@ -13,21 +13,46 @@
   let AUTO_DELAY_MS = 0;
   let AUTO_ENABLED  = false;
 
+  // عدد الطلبات التلقائية (1 = طلب واحد فقط)
+  let AUTO_REPEAT_COUNT = 1;
+  // الفاصل بين الطلبات الإضافية (بعد الأولى) بالميلي ثانية
+  const REPEAT_GAP_MS = 1000;
+
   function loadDelaySnapshot() {
     try {
       const snap = window.__SAMURAI_STORAGE || {};
-      const enabled = (snap.calendria_use_delays || "off") === "on";
-      const raw = snap.calendria_delay_slotselection;
 
-      if (enabled && raw !== undefined && raw !== null && String(raw).trim() !== "") {
-        const n = parseFloat(String(raw).replace(",", "."));
+      const enabled = (snap.calendria_use_delays || "off") === "on";
+      const rawDelay = snap.calendria_delay_slotselection;
+
+      // SlotSelection delay
+      if (enabled && rawDelay !== undefined && rawDelay !== null && String(rawDelay).trim() !== "") {
+        const n = parseFloat(String(rawDelay).replace(",", "."));
         if (!isNaN(n) && n >= 0) {
           AUTO_DELAY_MS = n * 1000; // seconds → ms
           AUTO_ENABLED  = true;
         }
       }
 
-      console.log("[CALENDRIA][DynSlots] SlotSelection delay (ms):", AUTO_DELAY_MS, "enabled:", AUTO_ENABLED);
+      // عدد الطلبات التلقائية من الاضافة
+      // المفتاح في الستوريج: calendria_delay_slotselection_requests
+      const rawRepeat = snap.calendria_delay_slotselection_requests;
+      if (rawRepeat !== undefined && rawRepeat !== null && String(rawRepeat).trim() !== "") {
+        const r = parseInt(String(rawRepeat), 10);
+        if (!isNaN(r) && r > 0) {
+          // نحصرها بين 1 و 10 فقط
+          AUTO_REPEAT_COUNT = Math.min(Math.max(r, 1), 10);
+        }
+      }
+
+      console.log(
+        "[CALENDRIA][DynSlots] SlotSelection delay (ms):",
+        AUTO_DELAY_MS,
+        "enabled:",
+        AUTO_ENABLED,
+        "repeatCount:",
+        AUTO_REPEAT_COUNT
+      );
     } catch (e) {
       console.warn("[CALENDRIA][DynSlots] cannot read SlotSelection delay from storage", e);
     }
@@ -901,6 +926,33 @@
   }
 
   // =======================================================
+  // AUTO SEQUENCE (delay + تكرار الطلبات)
+  // =======================================================
+  async function runAutoSequence() {
+    const repeat = AUTO_REPEAT_COUNT || 1;
+    log("Auto sequence start. delay(ms):", AUTO_DELAY_MS, "repeat:", repeat);
+
+    for (let i = 0; i < repeat; i++) {
+      if (i === 0) {
+        // أول طلب: يستعمل الـ delay مع العد التنازلي في الزر
+        if (AUTO_DELAY_MS > 0) {
+          await new Promise(resolve => startInlineCountdownAlways(AUTO_DELAY_MS, resolve));
+        }
+      } else {
+        // الطلبات الإضافية: ننتظر REPEAT_GAP_MS فقط بدون عداد في الزر
+        if (REPEAT_GAP_MS > 0) {
+          await sleep(REPEAT_GAP_MS);
+        }
+      }
+
+      if (SAMURAI_ALL_MODE) await postAllOpenSlotsAuto();
+      else await submitOneHour();
+    }
+
+    log("Auto sequence finished");
+  }
+
+  // =======================================================
   // BOOT
   // =======================================================
   async function boot() {
@@ -938,10 +990,7 @@
     }
 
     if (AUTO_ENABLED) {
-      startInlineCountdownAlways(AUTO_DELAY_MS, async () => {
-        if (SAMURAI_ALL_MODE) await postAllOpenSlotsAuto();
-        else await submitOneHour();
-      });
+      runAutoSequence().catch(e => warn("Auto sequence error", e));
     }
   }
 
