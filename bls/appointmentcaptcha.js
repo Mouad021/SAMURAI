@@ -18,29 +18,48 @@
   // =========================
   // CAPTCHA MODE (AW8 / NoCaptchaAI)
   // =========================
+  //  ✅ يعتمد فقط على الزر:
+  //  - OFF  = AW8
+  //  - ON   = NoCaptchaAI
   let __cal_captcha_mode = "aw8";       // "aw8" | "nocaptchaai"
   let __cal_captcha_apikey = "";        // NoCaptchaAI apiKey
   let __captcha_settings_loaded = false;
 
+  // ⬅️ هادي دابا كتشغّل منطق واحد فقط حسب المود
   function onCaptchaSettingsReady() {
     __captcha_settings_loaded = true;
-    try { initAw8AppointmentCaptcha(); } catch (e) { console.warn("[CAL][Appt] AW8 init error", e); }
-    try { initNoCaptchaAppointmentIfEnabled(); } catch (e) { console.warn("[CAL][Appt] NCAI init error", e); }
+
+    try {
+      if (__cal_captcha_mode === "nocaptchaai") {
+        console.log("[CALENDRIA][AppointmentCaptcha] Using NoCaptchaAI (button = ON)");
+        // NoCaptchaAI فقط
+        initNoCaptchaAppointmentIfEnabled();
+      } else {
+        console.log("[CALENDRIA][AppointmentCaptcha] Using AW8 (button = OFF)");
+        // AW8 فقط
+        initAw8AppointmentCaptcha();
+      }
+    } catch (e) {
+      console.warn("[CALENDRIA][AppointmentCaptcha] init error:", e);
+    }
   }
 
+  // نقرؤوا الإعدادات مرة وحدة من الـ storage ديال الإضافة
   try {
     if (typeof chrome !== "undefined" && chrome.storage?.local) {
       chrome.storage.local.get(
         ["cal_captcha_mode", "cal_captcha_apikey"],
         (res = {}) => {
-          __cal_captcha_mode = res.cal_captcha_mode || "aw8";
+          __cal_captcha_mode  = res.cal_captcha_mode  || "aw8";
           __cal_captcha_apikey = res.cal_captcha_apikey || "";
+
           console.log(
-            "[CALENDRIA][AppointmentCaptcha][CAPTCHA] mode =",
+            "[CALENDRIA][AppointmentCaptcha][CAPTCHA] mode from popup =",
             __cal_captcha_mode,
             "apiKey.len=",
             __cal_captcha_apikey.length
           );
+
           onCaptchaSettingsReady();
         }
       );
@@ -774,3 +793,4 @@
   }
 
 })();
+
