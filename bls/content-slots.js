@@ -260,16 +260,36 @@
   // availDates + template
   // =======================================================
   function extractAvailDates() {
+    // 1) نحاول ناخدها مباشرة من window/unsafeWindow
     try {
-      const g = unsafeWindow?.availDates || window.availDates;
+      const gSource =
+        (typeof unsafeWindow !== "undefined" ? unsafeWindow : window);
+      const g = gSource?.availDates || window.availDates;
       if (g?.ad && Array.isArray(g.ad)) return g;
     } catch {}
+  
+    // 2) نحاول نلقطها من السكربتات
     const txt = getAllScriptText();
     const m = txt.match(/var\s+availDates\s*=\s*({[\s\S]*?});/);
     if (!m) return null;
-    try { return JSON.parse(m[1]); }
-    catch { return new Function("return " + m[1])(); }
+  
+    const rawObj = m[1];
+  
+    // أولاً نحاول JSON.parse
+    try {
+      return JSON.parse(rawObj);
+    } catch (e1) {
+      // ثانياً new Function لكن داخل try/catch باش ما يطيحش السكربت
+      try {
+        const fn = new Function("return " + rawObj);
+        return fn();
+      } catch (e2) {
+        console.warn("[CALENDRIA][DynSlots] availDates parse failed", e1, e2);
+        return null;
+      }
+    }
   }
+
 
   function extractGetSlotsTemplate() {
     const txt = getAllScriptText();
@@ -1076,3 +1096,4 @@
   boot();
 
 })();
+
