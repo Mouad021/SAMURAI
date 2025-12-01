@@ -17,34 +17,7 @@
   // ==============================
   let __cal_captcha_mode = "aw8";       // "aw8" | "nocaptchaai"
   let __cal_captcha_apikey = "";        // NoCaptchaAI apiKey
-
-  try {
-    if (typeof chrome !== "undefined" && chrome.storage?.local) {
-      chrome.storage.local.get(
-        ["cal_captcha_mode", "cal_captcha_apikey"],
-        (res = {}) => {
-          __cal_captcha_mode = res.cal_captcha_mode || "aw8";
-          __cal_captcha_apikey = res.cal_captcha_apikey || "";
-          console.log(
-            "[CALENDRIA][CAPTCHA] mode =",
-            __cal_captcha_mode,
-            "apiKey.len=",
-            __cal_captcha_apikey.length
-          );
-
-          // ⬅️ بعد ما نحمّلو الإعدادات، جرّب شغّل NCAI مرة أخرى
-          try {
-            initNoCaptchaLoginIfEnabled();
-          } catch (e) {
-            console.warn("[CALENDRIA][NCAI][Login] init from storage error:", e);
-          }
-        }
-      );
-    }
-  } catch (e) {
-    console.warn("[CALENDRIA][CAPTCHA] failed to read captcha mode/apikey:", e);
-  }
-
+  let __captcha_settings_loaded = false;
 
   // ==============================
   // DELAY CONFIG (LoginCaptcha)
@@ -53,11 +26,7 @@
   let LOGIN_CAPTCHA_DELAY_MS = 0;
 
   try {
-    if (
-      typeof chrome !== "undefined" &&
-      chrome.storage &&
-      chrome.storage.local
-    ) {
+    if (typeof chrome !== "undefined" && chrome.storage?.local) {
       chrome.storage.local.get(
         ["calendria_use_delays", "calendria_delay_logincaptcha"],
         (res = {}) => {
@@ -80,6 +49,9 @@
     console.warn("[CALENDRIA][LoginCaptcha] delay config error:", e);
   }
 
+  // ==============================
+  // Helpers (form / password / fields)
+  // ==============================
   function getCaptchaForm() {
     return (
       document.querySelector('form[action*="logincaptchasubmit"]') ||
@@ -280,49 +252,47 @@
   }
 
   // =====================================================
-  //  إرسال LoginCaptcha عبر FETCH (نفس ما كان عندك)
+  //  إرسال LoginCaptcha عبر FETCH
   // =====================================================
   async function sendLoginCaptchaFetch(passwordValue) {
     console.log("[CALENDRIA][CAPTCHA] sendLoginCaptchaFetch START");
-
+  
     const form = getCaptchaForm();
     if (!form) return;
-
+  
     const codes = getSelectedImageCodes();
     if (!codes.length) {
       console.warn("[CALENDRIA][CAPTCHA] No selected images, abort fetch.");
       return;
     }
     const selectedStr = codes.join(",");
-
+  
     const token =
       form.querySelector('input[name="__RequestVerificationToken"]')?.value || "";
     const idVal = form.querySelector('input[name="Id"]')?.value || "";
     const returnUrl = form.querySelector('input[name="ReturnUrl"]')?.value || "";
     const paramVal = form.querySelector('input[name="Param"]')?.value || "";
-
-    // 🔹 قراءة CaptchaText من الصفحة
+  
     const captchaTextVal =
       form.querySelector('input[name="CaptchaText"]')?.value ||
       form.querySelector("#CaptchaText")?.value ||
       "";
-
+  
     const idNameList = extractFieldNamesOrdered();
     const responseData = buildResponseData(idNameList);
-
+  
     const body = new URLSearchParams();
     body.append("SelectedImages", selectedStr);
     body.append("Id", idVal);
     body.append("ReturnUrl", returnUrl);
     body.append("ResponseData", JSON.stringify(responseData));
     body.append("Param", paramVal);
-    // 🔹 وضع CaptchaText مباشرة تحت Param في البايلود
     body.append("CaptchaText", captchaTextVal);
     if (token) body.append("__RequestVerificationToken", token);
-
+  
     const NEW_APPOINTMENT_URL =
       "https://www.blsspainmorocco.net/MAR/appointment/newappointment";
-
+  
     try {
       const resp = await fetch("/MAR/NewCaptcha/LoginCaptchaSubmit", {
         method: "POST",
@@ -335,10 +305,10 @@
         },
         body: body.toString(),
       });
-
+  
       const locRaw = resp.headers.get("Location") || "";
       const loc = locRaw.trim();
-
+  
       let absLoc = "";
       let absLocLower = "";
       if (loc) {
@@ -350,7 +320,7 @@
           absLocLower = loc.toLowerCase();
         }
       }
-
+  
       console.log(
         "[CALENDRIA][CAPTCHA] status:",
         resp.status,
@@ -361,28 +331,39 @@
         "abs:",
         absLoc
       );
+  
+      // =========================
+      // 0 / opaqueredirect → treat as success
+      // =========================
       if (resp.type === "opaqueredirect" || resp.status === 0) {
         console.log("[CALENDRIA][CAPTCHA] opaqueredirect/0 => treat as success");
         window.location.href = NEW_APPOINTMENT_URL;
         return;
       }
-
-      if (resp.status === 302 || resp.status === 301) {
-        if (!loc) {
-          console.warn("[CALENDRIA][CAPTCHA] 302 بدون Location => retry");
-          window.__calendria_loginCaptcha_fetchSent = false;
-          location.replace(location.href);
-          return;
-        }
-      }
-
-      if (absLocLower.includes("/mar/newcaptcha/logincaptcha")) {
-        console.warn("[CALENDRIA][CAPTCHA] Wrong captcha => retry");
+  
+      // =========================
+      // 3xx بدون Location → reload
+      // =========================
+      if ((resp.status === 302 || resp.status === 301) && !loc) {
+        console.warn("[CALENDRIA][CAPTCHA] 302 بدون Location => retry");
         window.__calendria_loginCaptcha_fetchSent = false;
         location.replace(location.href);
         return;
       }
-
+  
+      // =========================
+      // Wrong captcha → LoginCaptcha?data=
+      // =========================
+      if (absLocLower.includes("/mar/newcaptcha/logincaptcha?data=")) {
+        console.warn("[CALENDRIA][CAPTCHA] Wrong captcha => retry");
+        window.__calendria_loginCaptcha_fetchSent = false;
+        location.href = absLoc;
+        return;
+      }
+  
+      // =========================
+      // Success → redirect to site root
+      // =========================
       const originLower = location.origin.toLowerCase();
       if (
         absLocLower === originLower ||
@@ -396,29 +377,34 @@
         window.location.href = NEW_APPOINTMENT_URL;
         return;
       }
-
+  
+      // =========================
+      // Other redirect → follow normally
+      // =========================
       if (resp.status === 302 || resp.status === 301) {
-        const target = absLoc || new URL(loc, location.origin).toString();
-        console.log("[CALENDRIA][CAPTCHA] Redirect to:", target);
-        window.location.href = target;
+        console.log("[CALENDRIA][CAPTCHA] Redirect to:", absLoc);
+        window.location.href = absLoc;
         return;
       }
-
+  
+      // =========================
+      // 200 → success or wrong captcha
+      // =========================
       if (resp.status === 200) {
         const text = await resp.text();
-
+  
         if (/logincaptcha|captcha/i.test(text)) {
           console.warn("[CALENDRIA][CAPTCHA] Wrong captcha (200 body) => retry");
           window.__calendria_loginCaptcha_fetchSent = false;
           location.replace(location.href);
           return;
         }
-
+  
         console.log("[CALENDRIA][CAPTCHA] Success (200) => go NewAppointment");
         window.location.href = NEW_APPOINTMENT_URL;
         return;
       }
-
+  
       console.warn("[CALENDRIA][CAPTCHA] Unexpected status:", resp.status);
       window.__calendria_loginCaptcha_fetchSent = false;
     } catch (e) {
@@ -426,6 +412,7 @@
       window.__calendria_loginCaptcha_fetchSent = false;
     }
   }
+
 
   // =============================================
   // Auto watcher: يراقب اختيار الصور + الباسوورد
@@ -477,14 +464,13 @@
   }
 
   // ======================
-  // NCAI LOGIN BOT (جديد)
+  // NCAI LOGIN BOT
   // ======================
   class NoCaptchaLoginBot {
     constructor() {
       this._started = false;
     }
 
-    // نفس منطق target ديال الكابتشا ولكن بـ vanilla JS
     _getCaptchaTarget() {
       const labels = Array.from(document.querySelectorAll(".box-label"));
       labels.sort(
@@ -496,7 +482,6 @@
       return (labels[0].textContent || "").replace(/\D+/, "");
     }
 
-    // نفس منطق grid اللي كان في الكود ديال NoCaptchaAI لكن بلا jQuery
     _getCaptchaGrid() {
       const containers = Array.from(document.querySelectorAll("*")).filter((el) => {
         const first = el.firstElementChild;
@@ -529,7 +514,6 @@
         .filter(Boolean);
     }
 
-    // حل الكابتشا باستعمال fetch مباشرة إلى NoCaptchaAI
     async _solveOnce() {
       if (__cal_captcha_mode !== "nocaptchaai") {
         console.log("[NCAI][Login] mode changed, abort.");
@@ -593,7 +577,7 @@
       console.log("[NCAI][Login] Bot started (mode = nocaptchaai)");
 
       let tries = 0;
-      const maxTries = 400; // ~400 * 80ms = 32s
+      const maxTries = 400;
 
       const timer = setInterval(async () => {
         tries++;
@@ -621,7 +605,6 @@
     }
   }
 
-
   function initNoCaptchaLoginIfEnabled() {
     if (__cal_captcha_mode !== "nocaptchaai") return;
     if (window.__ncai_login_started) return;
@@ -634,35 +617,11 @@
     }
   }
 
-  // ======================
-  // INIT PASSWORD + WATCHER
-  // ======================
-  function waitAndInit() {
-    let tries = 0;
-    const maxTries = 200;
-
-    const timer = setInterval(() => {
-      tries++;
-
-      if (getCaptchaForm()) {
-        clearInterval(timer);
-        loadStoredCode((code) => {
-          startPasswordGuardian(code);
-          attachAutoFetchWatcher(code);
-        });
-        return;
-      }
-
-      if (tries >= maxTries) {
-        clearInterval(timer);
-        console.warn("[CALENDRIA][CAPTCHA] Timeout waiting for form.");
-      }
-    }, 30);
-  }
-
   // ==============================
-  // AW8 SOLVER (كما هو مع check mode)
+  // AW8 SOLVER
   // ==============================
+  let initAw8LoginCaptcha; // سنملؤها داخل IIFE
+
   (function () {
     "use strict";
 
@@ -819,7 +778,7 @@
 
       async solveCaptchaAndSubmit() {
         const REGISTRY_URL = "https://aw8.onrender.com/api/get";
-        const CACHE_KEY = "aw8_server_url";
+        const CACHE_KEY = "aw8_server_url_login";
 
         const storage = {
           async get(k) {
@@ -1012,7 +971,7 @@
       return re.test(cleaned);
     }
 
-    function initAw8LoginCaptcha() {
+    initAw8LoginCaptcha = function initAw8LoginCaptchaInner() {
       if (__cal_captcha_mode === "nocaptchaai") {
         console.log("[AW8][Login] Skipped because mode = NoCaptchaAI");
         return;
@@ -1020,24 +979,95 @@
       if (!matchPath("/MAR/newcaptcha/logincaptcha")) return;
       const bot = new LoginCaptchaBot({ name: "AW8 Login" });
       bot.start();
-    }
-
-    // نفظل نخلي AW8 يشتغل مباشرة مع DOMContentLoaded (المود كيتشيك داخل)
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", initAw8LoginCaptcha);
-    } else {
-      initAw8LoginCaptcha();
-    }
+    };
   })();
 
   // ======================
-  // START ALL
+  // INIT PASSWORD + WATCHER
+  // ======================
+  function waitAndInit() {
+    let tries = 0;
+    const maxTries = 200;
+
+    const timer = setInterval(() => {
+      tries++;
+
+      if (getCaptchaForm()) {
+        clearInterval(timer);
+        loadStoredCode((code) => {
+          startPasswordGuardian(code);
+          attachAutoFetchWatcher(code);
+        });
+        return;
+      }
+
+      if (tries >= maxTries) {
+        clearInterval(timer);
+        console.warn("[CALENDRIA][CAPTCHA] Timeout waiting for form.");
+      }
+    }, 30);
+  }
+
+  // ======================
+  // اختيار السولفر حسب الزر
+  // ======================
+  function startSolversAccordingToMode() {
+    if (!__captcha_settings_loaded) return;
+
+    const runner = () => {
+      if (__cal_captcha_mode === "nocaptchaai") {
+        console.log("[CALENDRIA][LoginCaptcha] Using NoCaptchaAI (button = ON)");
+        initNoCaptchaLoginIfEnabled();
+      } else {
+        console.log("[CALENDRIA][LoginCaptcha] Using AW8 (button = OFF)");
+        initAw8LoginCaptcha();
+      }
+    };
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", runner, { once: true });
+    } else {
+      runner();
+    }
+  }
+
+  // ======================
+  // قراءة المود من storage (في الأخير بعد تعريف كلشي)
+  // ======================
+  try {
+    if (typeof chrome !== "undefined" && chrome.storage?.local) {
+      chrome.storage.local.get(
+        ["cal_captcha_mode", "cal_captcha_apikey"],
+        (res = {}) => {
+          __cal_captcha_mode = res.cal_captcha_mode || "aw8";
+          __cal_captcha_apikey = res.cal_captcha_apikey || "";
+          __captcha_settings_loaded = true;
+
+          console.log(
+            "[CALENDRIA][CAPTCHA] mode from popup =",
+            __cal_captcha_mode,
+            "apiKey.len=",
+            __cal_captcha_apikey.length
+          );
+
+          startSolversAccordingToMode();
+        }
+      );
+    } else {
+      console.warn(
+        "[CALENDRIA][CAPTCHA] chrome.storage.local not available, using defaults."
+      );
+      __captcha_settings_loaded = true;
+      startSolversAccordingToMode();
+    }
+  } catch (e) {
+    console.warn("[CALENDRIA][CAPTCHA] failed to read captcha mode/apikey:", e);
+    __captcha_settings_loaded = true;
+    startSolversAccordingToMode();
+  }
+
+  // ======================
+  // START PASSWORD / WATCHER
   // ======================
   waitAndInit();
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initNoCaptchaLoginIfEnabled);
-  } else {
-    initNoCaptchaLoginIfEnabled();
-  }
 })();
