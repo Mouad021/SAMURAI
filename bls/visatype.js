@@ -16,6 +16,10 @@
 
   function safeArray(x) { return Array.isArray(x) ? x : []; }
 
+  // سنخزن Snapshot ديال ResponseData الأصلي قبل أي تعديل
+  let __vt_initialRespData = null;
+  let __vt_submittedMapCache = null;
+
   // ---------- 1) قراءة الآراي من السكريبتات ----------
   function extractArrayFromScripts(varName) {
     const re = new RegExp("var\\s+" + varName + "\\s*=\\s*(\\[[\\s\\S]*?\\]);");
@@ -84,10 +88,10 @@
         ],
         (res = {}) => {
           const choices = {
-            locName:   (res.calendria_location_name || "").trim(),
-            vsName:    (res.calendria_visatype_name || "").trim(),
-            vsSubName: (res.calendria_visasub_name || "").trim(),
-            catName:   (res.calendria_category_name || "").trim(),
+            locName:   (res.calendria_location_name  || "").trim(),
+            vsName:    (res.calendria_visatype_name  || "").trim(),
+            vsSubName: (res.calendria_visasub_name   || "").trim(),
+            catName:   (res.calendria_category_name  || "").trim(),
           };
           log("popup choices:", choices);
           resolve(choices);
@@ -96,7 +100,7 @@
     });
   }
 
-  // ---------- 2.5) قراءة اختيار Number Of Members من الإضافة / الصفحة ----------
+  // ---------- 2.5) قراءة عدد الممبرز ----------
   function loadMembersCount() {
     return new Promise((resolve) => {
       if (!chrome?.storage?.local) {
@@ -265,69 +269,8 @@
     });
   }
 
-  // -------- AppointmentFor: قراءة من DOM --------
-  function readAppointmentForFromDom(form) {
-    // 1) hidden AppointmentFor إذا كاين
-    const hidden = form.querySelector('[name="AppointmentFor"]');
-    if (hidden && hidden.value) {
-      const v = String(hidden.value).trim();
-      if (v) return v;
-    }
-
-    // 2) الراديوهات الجديدة: value = "Family" / "Individual"
-    const familyChecked = form.querySelector(
-      'input[type="radio"][value="Family"]:checked'
-    );
-    const indivChecked = form.querySelector(
-      'input[type="radio"][value="Individual"]:checked'
-    );
-
-    if (familyChecked) return "Family";
-    if (indivChecked)  return "Individual";
-
-    // 3) fallback للـ IDs القديمة
-    const familyById = form.querySelector(
-      'input[type="radio"][id^="family"]:checked'
-    );
-    const selfById = form.querySelector(
-      'input[type="radio"][id^="self"]:checked'
-    );
-    if (familyById) return "Family";
-    if (selfById)   return "Individual";
-
-    return "";
-  }
-
-  // نفضّل قيمة المخزن calendria_appointment_for إن وُجدت
-  function getAppointmentForValue(form) {
-    return new Promise((resolve) => {
-      if (!chrome?.storage?.local) {
-        resolve(readAppointmentForFromDom(form));
-        return;
-      }
-
-      chrome.storage.local.get(["calendria_appointment_for"], (res = {}) => {
-        const raw = (res.calendria_appointment_for || "").toString().trim().toLowerCase();
-
-        if (raw === "family") {
-          resolve("Family");
-        } else if (raw === "individual") {
-          resolve("Individual");
-        } else {
-          resolve(readAppointmentForFromDom(form));
-        }
-      });
-    });
-  }
-
-  // ---------- 5.5) حقن Number Of Members (فقط إذا Family) ----------
+  // ---------- 5.5) حقن Number Of Members (بعد ما AppointmentFor تكون Family) ----------
   async function applyMembersField(form) {
-    const apptFor = await getAppointmentForValue(form);
-    if (apptFor !== "Family") {
-      log("[VT] AppointmentFor != Family → skipping members injection");
-      return;
-    }
-
     const membersCount = await loadMembersCount();
     if (!membersCount || membersCount < 2) {
       log("[VT] membersCount < 2 → skipping members injection");
@@ -403,6 +346,8 @@
 
   // ---------- 7) قراءة submittedData من سكريبت الصفحة ----------
   function parseSubmittedDataSpec() {
+    if (__vt_submittedMapCache) return __vt_submittedMapCache;
+
     const scripts = Array.from(document.scripts || []);
     for (const s of scripts) {
       const txt = s.textContent || "";
@@ -424,29 +369,64 @@
       }
       if (out.length) {
         log("[VT] parsed submittedData map from page script:", out);
+        __vt_submittedMapCache = out;
         return out;
       }
     }
     warn("[VT] could not parse submittedData map, fallback mode");
+    __vt_submittedMapCache = [];
     return [];
+  }
+
+  // helper: واش الإليمنت ظاهر؟
+  function isVisibleField(el) {
+    if (!el) return false;
+    const host = el.closest(".mb-3") || el;
+    const cs = window.getComputedStyle(host);
+    if (cs.display === "none" || cs.visibility === "hidden") return false;
+    return true;
+  }
+
+  // ---------- 7.5) Snapshot أولي لـ ResponseData (باش نبقي Individual فالباقي) ----------
+  function snapshotInitialResponseData(form) {
+    if (__vt_initialRespData) return;
+
+    const map = parseSubmittedDataSpec();
+    if (!map.length) return;
+
+    const obj = {};
+    for (let i = 0; i < map.length && i < 50; i++) {
+      const { name, id } = map[i];
+      const el = document.getElementById(id);
+      obj[name] = el && el.value != null ? String(el.value) : "";
+    }
+    __vt_initialRespData = obj;
+    log("[VT] initial ResponseData snapshot:", obj);
   }
 
   // ---------- 8) بناء ResponseData ----------
   function buildResponseDataObject(form) {
     const map = parseSubmittedDataSpec();
 
-    if (map.length) {
-      const obj = {};
-      for (let i = 0; i < map.length && i < 25; i++) {
+    // إذا عندنا Snapshot أولي → نخدم عليه
+    if (map.length && __vt_initialRespData) {
+      const obj = { ...__vt_initialRespData };
+
+      for (let i = 0; i < map.length && i < 50; i++) {
         const { name, id } = map[i];
         const el = document.getElementById(id);
-        const val = el ? el.value : "";
-        obj[name] = val;
+
+        // نغيّر فقط الحقول اللي مربوطة بعنصر ظاهر (الحقيقي في الفورم)
+        if (el && isVisibleField(el)) {
+          obj[name] = el.value != null ? String(el.value) : "";
+        }
       }
-      log("[VT] ResponseData built from submittedData map (<=25 keys):", obj);
+
+      log("[VT] ResponseData (snapshot + visible overrides):", obj);
       return obj;
     }
 
+    // ---- fallback القديم (بدون submittedData) ----
     const keys = [];
     const seen = new Set();
     function pushKey(k) {
@@ -480,28 +460,79 @@
     return obj;
   }
 
-  // ---------- 8.5) مزامنة الراديو ديال AppointmentFor ----------
+  // ---------- 9) AppointmentFor ----------
+
+  function readAppointmentForFromDom(form) {
+    // hidden
+    const hidden = form.querySelector('[name="AppointmentFor"]');
+    if (hidden && hidden.value) {
+      return String(hidden.value).trim();
+    }
+
+    // راديوهات جديدة بالقيمة
+    const familyChecked = form.querySelector('input[type="radio"][value="Family"]:checked');
+    const indivChecked  = form.querySelector('input[type="radio"][value="Individual"]:checked');
+
+    if (familyChecked) return "Family";
+    if (indivChecked)  return "Individual";
+
+    // fallback ids القديمة
+    const familyById = form.querySelector('input[type="radio"][id^="family"]:checked');
+    const selfById   = form.querySelector('input[type="radio"][id^="self"]:checked');
+    if (familyById) return "Family";
+    if (selfById)   return "Individual";
+
+    return "";
+  }
+
+  function getAppointmentForValue(form) {
+    return new Promise((resolve) => {
+      if (!chrome?.storage?.local) {
+        resolve(readAppointmentForFromDom(form));
+        return;
+      }
+
+      chrome.storage.local.get(["calendria_appointment_for"], (res = {}) => {
+        const raw = (res.calendria_appointment_for || "").toString().trim().toLowerCase();
+
+        if (raw === "family") {
+          resolve("Family");
+        } else if (raw === "individual") {
+          resolve("Individual");
+        } else {
+          resolve(readAppointmentForFromDom(form));
+        }
+      });
+    });
+  }
+
+  // نضغط على الراديو باش الموقع يفعّل OnAppointmentForChange ويظهر Members
   function syncAppointmentForRadios(form, apptForVal) {
     if (!apptForVal) return;
 
-    const radios = form.querySelectorAll(
-      'input[type="radio"][value="Family"], ' +
-      'input[type="radio"][value="Individual"]'
-    );
+    let radio =
+      form.querySelector('input[type="radio"][value="' + apptForVal + '"]');
 
-    radios.forEach((r) => {
-      if (apptForVal === "Family" && r.value === "Family") {
-        r.checked = true;
-      } else if (apptForVal === "Individual" && r.value === "Individual") {
-        r.checked = true;
-      }
-    });
+    if (!radio && apptForVal === "Family") {
+      radio = form.querySelector('input[type="radio"][id^="family"]');
+    } else if (!radio && apptForVal === "Individual") {
+      radio = form.querySelector('input[type="radio"][id^="self"]');
+    }
 
-    const hidden = form.querySelector('[name="AppointmentFor"]');
-    if (hidden) hidden.value = apptForVal;
+    if (!radio) {
+      log("[VT] no AppointmentFor radio found for", apptForVal);
+      return;
+    }
+
+    if (!radio.checked) {
+      radio.click(); // هذا اللي كينادي OnAppointmentForChange وكيظهر Number Of Members
+      log("[VT] clicked AppointmentFor radio →", apptForVal);
+    } else {
+      log("[VT] AppointmentFor radio already checked →", apptForVal);
+    }
   }
 
-  // ---------- 9) بناء البايلود و الإرسال بـ fetch ----------
+  // ---------- 10) بناء البايلود و الإرسال بـ fetch ----------
   async function buildPayloadAndSend(form) {
     if (window.__cal_vt_sent) {
       warn("already sent once, skipping");
@@ -525,17 +556,11 @@
     const tokenVal = tokenInput ? tokenInput.value : "";
     const recVal   = recInput   ? recInput.value   : "";
 
-    // 1) نجيب AppointmentFor ونزامن الراديو/hidden
-    const apptForVal = await getAppointmentForValue(form);
-    syncAppointmentForRadios(form, apptForVal);
-
-    // 2) دابا نبني FormData باش يشمل الاسم العشوائي ديال الراديو (afnyulwebee=Family ...)
     const fd = new FormData(form);
 
-    // 3) نضبط الحقول الخاصة
+    // ما كنبدلوش AppointmentFor هنا باش يبقاو الحقول المموهة Individual كما كانوا
     fd.set("Data", dataVal);
     fd.set("DataSource", dsVal);
-    fd.set("AppointmentFor", apptForVal);
     fd.set("ReCaptchaToken", recVal);
     fd.set("__RequestVerificationToken", tokenVal);
     fd.set("ResponseData", JSON.stringify(respObj));
@@ -610,7 +635,7 @@
     }, delayMs);
   }
 
-  // ---------- 10) main ----------
+  // ---------- 11) main ----------
   async function main() {
     if (!isVisaTypePage()) return;
 
@@ -627,6 +652,9 @@
       e.preventDefault();
       warn("native form submit intercepted (custom CALENDRIA flow will send instead)");
     });
+
+    // Snapshot أولي لـ ResponseData قبل أي تغيير
+    snapshotInitialResponseData(form);
 
     const arrays   = getPageArrays();
     const choices  = await loadPopupChoices();
@@ -648,11 +676,18 @@
     if (fields.visaSubTypeId) forceValueIntoField(fields.visaSubTypeId, ids.visaSubTypeId);
     if (fields.categoryId)    forceValueIntoField(fields.categoryId,    ids.categoryId);
 
-    // members (فقط إذا Family)
+    // AppointmentFor من الإضافة (Individual/Family)
+    const apptForVal = await getAppointmentForValue(form);
+    syncAppointmentForRadios(form, apptForVal);
+
+    // نعطي شوية وقت لسكربت الموقع باش يظهر Number Of Members و يملأ applicantsNoData
+    await new Promise((r) => setTimeout(r, 150));
+
+    // Number Of Members من popup → Kendo
     await applyMembersField(form);
 
     await buildPayloadAndSend(form);
-    log("[VT] fields filled + payload built, custom POST scheduled.");
+    log("[VT] fields filled + members + payload built, custom POST scheduled.");
   }
 
   if (document.readyState === "complete" || document.readyState === "interactive") {
