@@ -16,10 +16,6 @@
 
   function safeArray(x) { return Array.isArray(x) ? x : []; }
 
-  // سنخزن Snapshot ديال ResponseData الأصلي قبل أي تعديل
-  let __vt_initialRespData = null;
-  let __vt_submittedMapCache = null;
-
   // ---------- 1) قراءة الآراي من السكريبتات ----------
   function extractArrayFromScripts(varName) {
     const re = new RegExp("var\\s+" + varName + "\\s*=\\s*(\\[[\\s\\S]*?\\]);");
@@ -61,7 +57,7 @@
     return { locationData, visaIdData, visasubIdData, categoryData };
   }
 
-  // applicantsNoData (Number Of Members) من الصفحة
+  // ---------- 1.5) Number Of Members array ----------
   function getApplicantsNoData() {
     let arr = safeArray(window.applicantsNoData);
     if (!arr.length) {
@@ -71,10 +67,10 @@
     return arr;
   }
 
-  // ---------- 2) قراءة اختيارات الـ popup ----------
+  // ---------- 2) قراءة اختيارات popup (location / visa / subtype / category) ----------
   function loadPopupChoices() {
     return new Promise((resolve) => {
-      if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local) {
+      if (!chrome?.storage?.local) {
         resolve({ locName: "", vsName: "", vsSubName: "", catName: "" });
         return;
       }
@@ -100,7 +96,7 @@
     });
   }
 
-  // ---------- 2.5) قراءة عدد الممبرز ----------
+  // ---------- 2.5) عدد الممبرز من الإضافة / الصفحة ----------
   function loadMembersCount() {
     return new Promise((resolve) => {
       if (!chrome?.storage?.local) {
@@ -125,7 +121,7 @@
     });
   }
 
-  // ---------- 3) تحويل الأسماء إلى IDs ----------
+  // ---------- 3) تحويل أسماء popup إلى IDs ----------
   function resolveIds(arrays, choices) {
     const { locationData, visaIdData, visasubIdData, categoryData } = arrays;
     const { locName, vsName, vsSubName, catName } = choices;
@@ -175,7 +171,7 @@
     return result;
   }
 
-  // ---------- 4) تحديد input ديال كل حقل ----------
+  // ---------- 4) إيجاد input لكل dropdown ظاهر ----------
   function findVisibleFieldInputs(form) {
     const elements = form.querySelectorAll(".mb-3");
     let categoryId = null;
@@ -196,10 +192,10 @@
 
       if (!labelId) return;
 
-      if (labelText.includes("Category"))           categoryId    = labelId;
-      else if (labelText.includes("Location"))      locationId    = labelId;
-      else if (labelText.includes("Visa Type"))     visaTypeId    = labelId;
-      else if (labelText.includes("Visa Sub Type")) visaSubTypeId = labelId;
+      if (labelText.includes("Category"))           categoryId     = labelId;
+      else if (labelText.includes("Location"))      locationId     = labelId;
+      else if (labelText.includes("Visa Type"))     visaTypeId     = labelId;
+      else if (labelText.includes("Visa Sub Type")) visaSubTypeId  = labelId;
     });
 
     const res = { locationId, visaTypeId, visaSubTypeId, categoryId };
@@ -207,7 +203,7 @@
     return res;
   }
 
-  // نفس الطريقة لكن لـ Number Of Members
+  // Number Of Members input id
   function findMembersFieldInput(form) {
     const elements = form.querySelectorAll(".mb-3");
     let membersId = null;
@@ -269,7 +265,7 @@
     });
   }
 
-  // ---------- 5.5) حقن Number Of Members (بعد ما AppointmentFor تكون Family) ----------
+  // ---------- 5.5) حقن عدد الممبرز ----------
   async function applyMembersField(form) {
     const membersCount = await loadMembersCount();
     if (!membersCount || membersCount < 2) {
@@ -346,8 +342,6 @@
 
   // ---------- 7) قراءة submittedData من سكريبت الصفحة ----------
   function parseSubmittedDataSpec() {
-    if (__vt_submittedMapCache) return __vt_submittedMapCache;
-
     const scripts = Array.from(document.scripts || []);
     for (const s of scripts) {
       const txt = s.textContent || "";
@@ -369,118 +363,55 @@
       }
       if (out.length) {
         log("[VT] parsed submittedData map from page script:", out);
-        __vt_submittedMapCache = out;
         return out;
       }
     }
     warn("[VT] could not parse submittedData map, fallback mode");
-    __vt_submittedMapCache = [];
     return [];
   }
 
-  // helper: واش الإليمنت ظاهر؟
-  function isVisibleField(el) {
-    if (!el) return false;
-    const host = el.closest(".mb-3") || el;
-    const cs = window.getComputedStyle(host);
-    if (cs.display === "none" || cs.visibility === "hidden") return false;
-    return true;
-  }
-
-  // ---------- 7.5) Snapshot أولي لـ ResponseData (باش نبقي Individual فالباقي) ----------
-  function snapshotInitialResponseData(form) {
-    if (__vt_initialRespData) return;
-
-    const map = parseSubmittedDataSpec();
-    if (!map.length) return;
-
-    const obj = {};
-    for (let i = 0; i < map.length && i < 50; i++) {
-      const { name, id } = map[i];
-      const el = document.getElementById(id);
-      obj[name] = el && el.value != null ? String(el.value) : "";
-    }
-    __vt_initialRespData = obj;
-    log("[VT] initial ResponseData snapshot:", obj);
-  }
-
-  // ---------- 8) بناء ResponseData ----------
+  // ---------- 8) ResponseData = نفس منطق الموقع ----------
   function buildResponseDataObject(form) {
     const map = parseSubmittedDataSpec();
 
-    // إذا عندنا Snapshot أولي → نخدم عليه
-    if (map.length && __vt_initialRespData) {
-      const obj = { ...__vt_initialRespData };
-
+    // نفس منطق BLS بالضبط:
+    // var rd = {};
+    // for each (name,id) rd[name] = $("#" + id).val();
+    if (map.length) {
+      const obj = {};
       for (let i = 0; i < map.length && i < 50; i++) {
         const { name, id } = map[i];
         const el = document.getElementById(id);
-
-        // نغيّر فقط الحقول اللي مربوطة بعنصر ظاهر (الحقيقي في الفورم)
-        if (el && isVisibleField(el)) {
-          obj[name] = el.value != null ? String(el.value) : "";
-        }
+        obj[name] = el && el.value != null ? String(el.value) : "";
       }
-
-      log("[VT] ResponseData (snapshot + visible overrides):", obj);
+      log("[VT] ResponseData built from submittedData map:", obj);
       return obj;
     }
 
-    // ---- fallback القديم (بدون submittedData) ----
-    const keys = [];
-    const seen = new Set();
-    function pushKey(k) {
-      if (!k || seen.has(k)) return;
-      seen.add(k);
-      keys.push(k);
-    }
-
-    const hiddenInputs = form.querySelectorAll('input[type="hidden"][name]');
-    for (const el of hiddenInputs) {
-      const name = el.name;
-      if (
-        name === "Data" ||
-        name === "DataSource" ||
-        name === "ResponseData" ||
-        name === "AppointmentFor" ||
-        name === "ReCaptchaToken" ||
-        name === "__RequestVerificationToken"
-      ) continue;
-      pushKey(name);
-      if (keys.length >= 25) break;
-    }
-
+    // fallback (نادر)
     const obj = {};
-    for (const name of keys) {
-      const el = document.getElementById(name) ||
-                 document.getElementById("an" + name);
-      obj[name] = el ? el.value : "";
-    }
-    log("[VT] ResponseData built (fallback, first 25 keys):", obj);
+    log("[VT] ResponseData empty (no submittedData map)");
     return obj;
   }
 
-  // ---------- 9) AppointmentFor ----------
+  // ---------- 9) AppointmentFor (Family / Individual) ----------
 
   function readAppointmentForFromDom(form) {
-    // hidden
     const hidden = form.querySelector('[name="AppointmentFor"]');
     if (hidden && hidden.value) {
       return String(hidden.value).trim();
     }
 
-    // راديوهات جديدة بالقيمة
     const familyChecked = form.querySelector('input[type="radio"][value="Family"]:checked');
     const indivChecked  = form.querySelector('input[type="radio"][value="Individual"]:checked');
 
     if (familyChecked) return "Family";
     if (indivChecked)  return "Individual";
 
-    // fallback ids القديمة
-    const familyById = form.querySelector('input[type="radio"][id^="family"]:checked');
-    const selfById   = form.querySelector('input[type="radio"][id^="self"]:checked');
-    if (familyById) return "Family";
-    if (selfById)   return "Individual";
+    const familyOld = form.querySelector('input[type="radio"][id^="family"]:checked');
+    const selfOld   = form.querySelector('input[type="radio"][id^="self"]:checked');
+    if (familyOld) return "Family";
+    if (selfOld)   return "Individual";
 
     return "";
   }
@@ -506,7 +437,7 @@
     });
   }
 
-  // نضغط على الراديو باش الموقع يفعّل OnAppointmentForChange ويظهر Members
+  // نضغط على الراديو باش الموقع يشغّل OnAppointmentForChange و يـظهر Members
   function syncAppointmentForRadios(form, apptForVal) {
     if (!apptForVal) return;
 
@@ -525,7 +456,7 @@
     }
 
     if (!radio.checked) {
-      radio.click(); // هذا اللي كينادي OnAppointmentForChange وكيظهر Number Of Members
+      radio.click(); // هنا OnAppointmentForChange هو اللي كيعمر الحقل "الأصلي" ديال Family
       log("[VT] clicked AppointmentFor radio →", apptForVal);
     } else {
       log("[VT] AppointmentFor radio already checked →", apptForVal);
@@ -558,7 +489,7 @@
 
     const fd = new FormData(form);
 
-    // ما كنبدلوش AppointmentFor هنا باش يبقاو الحقول المموهة Individual كما كانوا
+    // مهم: لا نلمس AppointmentFor هنا نهائياً
     fd.set("Data", dataVal);
     fd.set("DataSource", dsVal);
     fd.set("ReCaptchaToken", recVal);
@@ -653,9 +584,6 @@
       warn("native form submit intercepted (custom CALENDRIA flow will send instead)");
     });
 
-    // Snapshot أولي لـ ResponseData قبل أي تغيير
-    snapshotInitialResponseData(form);
-
     const arrays   = getPageArrays();
     const choices  = await loadPopupChoices();
 
@@ -676,14 +604,14 @@
     if (fields.visaSubTypeId) forceValueIntoField(fields.visaSubTypeId, ids.visaSubTypeId);
     if (fields.categoryId)    forceValueIntoField(fields.categoryId,    ids.categoryId);
 
-    // AppointmentFor من الإضافة (Individual/Family)
+    // AppointmentFor (Individual / Family) من الإضافة
     const apptForVal = await getAppointmentForValue(form);
     syncAppointmentForRadios(form, apptForVal);
 
-    // نعطي شوية وقت لسكربت الموقع باش يظهر Number Of Members و يملأ applicantsNoData
+    // نعطي شوية وقت لسكربت الموقع باش يعمّر Number Of Members و applicantsNoData
     await new Promise((r) => setTimeout(r, 150));
 
-    // Number Of Members من popup → Kendo
+    // Number Of Members من popup → dropdown (باستعمال الـ Id كما العادة)
     await applyMembersField(form);
 
     await buildPayloadAndSend(form);
