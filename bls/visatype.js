@@ -67,7 +67,7 @@
     return arr;
   }
 
-  // ---------- 2) قراءة اختيارات popup (location / visa / subtype / category) ----------
+  // ---------- 2) قراءة اختيارات popup ----------
   function loadPopupChoices() {
     return new Promise((resolve) => {
       if (!chrome?.storage?.local) {
@@ -96,7 +96,7 @@
     });
   }
 
-  // ---------- 2.5) عدد الممبرز من الإضافة / الصفحة ----------
+  // ---------- 2.5) عدد الممبرز ----------
   function loadMembersCount() {
     return new Promise((resolve) => {
       if (!chrome?.storage?.local) {
@@ -192,10 +192,10 @@
 
       if (!labelId) return;
 
-      if (labelText.includes("Category"))           categoryId     = labelId;
-      else if (labelText.includes("Location"))      locationId     = labelId;
-      else if (labelText.includes("Visa Type"))     visaTypeId     = labelId;
-      else if (labelText.includes("Visa Sub Type")) visaSubTypeId  = labelId;
+      if (labelText.includes("Category"))           categoryId    = labelId;
+      else if (labelText.includes("Location"))      locationId    = labelId;
+      else if (labelText.includes("Visa Type"))     visaTypeId    = labelId;
+      else if (labelText.includes("Visa Sub Type")) visaSubTypeId = labelId;
     });
 
     const res = { locationId, visaTypeId, visaSubTypeId, categoryId };
@@ -340,7 +340,7 @@
     });
   }
 
-  // ---------- 7) قراءة submittedData من سكريبت الصفحة ----------
+  // ---------- 7) submittedData map ----------
   function parseSubmittedDataSpec() {
     const scripts = Array.from(document.scripts || []);
     for (const s of scripts) {
@@ -374,9 +374,6 @@
   function buildResponseDataObject(form) {
     const map = parseSubmittedDataSpec();
 
-    // نفس منطق BLS بالضبط:
-    // var rd = {};
-    // for each (name,id) rd[name] = $("#" + id).val();
     if (map.length) {
       const obj = {};
       for (let i = 0; i < map.length && i < 50; i++) {
@@ -388,14 +385,12 @@
       return obj;
     }
 
-    // fallback (نادر)
     const obj = {};
     log("[VT] ResponseData empty (no submittedData map)");
     return obj;
   }
 
-  // ---------- 9) AppointmentFor (Family / Individual) ----------
-
+  // ---------- 9) AppointmentFor ----------
   function readAppointmentForFromDom(form) {
     const hidden = form.querySelector('[name="AppointmentFor"]');
     if (hidden && hidden.value) {
@@ -437,33 +432,39 @@
     });
   }
 
-  // نضغط على الراديو باش الموقع يشغّل OnAppointmentForChange و يـظهر Members
+  // ✅ نعيّن الراديو + الـ hidden الأصلي (#name)
   function syncAppointmentForRadios(form, apptForVal) {
     if (!apptForVal) return;
 
-    let radio =
-      form.querySelector('input[type="radio"][value="' + apptForVal + '"]');
-
-    if (!radio && apptForVal === "Family") {
-      radio = form.querySelector('input[type="radio"][id^="family"]');
-    } else if (!radio && apptForVal === "Individual") {
-      radio = form.querySelector('input[type="radio"][id^="self"]');
-    }
-
+    // الراديو الهدف (عنده القيمة اللي بغينا)
+    const radio = form.querySelector('input[type="radio"][value="' + apptForVal + '"]');
     if (!radio) {
       log("[VT] no AppointmentFor radio found for", apptForVal);
       return;
     }
 
-    if (!radio.checked) {
-      radio.click(); // هنا OnAppointmentForChange هو اللي كيعمر الحقل "الأصلي" ديال Family
-      log("[VT] clicked AppointmentFor radio →", apptForVal);
+    const groupName = radio.name || "";
+    if (groupName) {
+      // نخلي الراديو ديال نفس المجموعة ينعلم صح/خطأ
+      const groupRadios = form.querySelectorAll('input[type="radio"][name="' + groupName + '"]');
+      groupRadios.forEach((r) => {
+        r.checked = (r === radio);
+      });
+
+      // hidden الأصلي: id = name ديال الراديو
+      const hidden = document.getElementById(groupName);
+      if (hidden) {
+        hidden.value = apptForVal;
+        log("[VT] set hidden AppointmentFor #" + groupName + " =", apptForVal);
+      } else {
+        log("[VT] hidden AppointmentFor #" + groupName + " not found");
+      }
     } else {
-      log("[VT] AppointmentFor radio already checked →", apptForVal);
+      radio.checked = true;
     }
   }
 
-  // ---------- 10) بناء البايلود و الإرسال بـ fetch ----------
+  // ---------- 10) POST ----------
   async function buildPayloadAndSend(form) {
     if (window.__cal_vt_sent) {
       warn("already sent once, skipping");
@@ -489,7 +490,7 @@
 
     const fd = new FormData(form);
 
-    // مهم: لا نلمس AppointmentFor هنا نهائياً
+    // ما نلمسوش AppointmentFor هنا
     fd.set("Data", dataVal);
     fd.set("DataSource", dsVal);
     fd.set("ReCaptchaToken", recVal);
@@ -604,14 +605,14 @@
     if (fields.visaSubTypeId) forceValueIntoField(fields.visaSubTypeId, ids.visaSubTypeId);
     if (fields.categoryId)    forceValueIntoField(fields.categoryId,    ids.categoryId);
 
-    // AppointmentFor (Individual / Family) من الإضافة
+    // AppointmentFor (Individual / Family) من popup
     const apptForVal = await getAppointmentForValue(form);
     syncAppointmentForRadios(form, apptForVal);
 
-    // نعطي شوية وقت لسكربت الموقع باش يعمّر Number Of Members و applicantsNoData
+    // نعطي شوية وقت بسيط باش أي logic داخلي يكمل
     await new Promise((r) => setTimeout(r, 150));
 
-    // Number Of Members من popup → dropdown (باستعمال الـ Id كما العادة)
+    // Number Of Members من popup → dropdown
     await applyMembersField(form);
 
     await buildPayloadAndSend(form);
