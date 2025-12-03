@@ -5,32 +5,28 @@
   window.__calendria_vt_injected = true;
 
   const LOG = "[CALENDRIA][VisaType]";
-
-  function log(...a) { console.log(LOG, ...a); }
-  function warn(...a) { console.warn(LOG, ...a); }
+  const log  = (...a) => console.log(LOG, ...a);
+  const warn = (...a) => console.warn(LOG, ...a);
 
   function isVisaTypePage() {
-    const href = String(location.href || "").toLowerCase();
-    return href.includes("/mar/appointment/visatype");
+    return String(location.href || "").toLowerCase().includes("/mar/appointment/visatype");
   }
-
   function safeArray(x) { return Array.isArray(x) ? x : []; }
 
   // ---------- 1) قراءة الآراي من السكريبتات ----------
   function extractArrayFromScripts(varName) {
     const re = new RegExp("var\\s+" + varName + "\\s*=\\s*(\\[[\\s\\S]*?\\]);");
-    const scripts = Array.from(document.scripts || []);
-    for (const s of scripts) {
+    for (const s of Array.from(document.scripts || [])) {
       const txt = s.textContent || "";
       const m = re.exec(txt);
       if (m && m[1]) {
         try {
           const arr = JSON.parse(m[1]);
           if (Array.isArray(arr)) {
-            log(`parsed ${varName} from inline <script>, len =`, arr.length);
+            log(`parsed ${varName} from inline <script>, len=`, arr.length);
             return arr;
           }
-        } catch { /* ignore */ }
+        } catch {}
       }
     }
     return [];
@@ -47,7 +43,7 @@
     if (!visasubIdData.length) visasubIdData = extractArrayFromScripts("visasubIdData");
     if (!categoryData.length)  categoryData  = extractArrayFromScripts("categoryData");
 
-    log("page arrays (from scripts):", {
+    log("page arrays:", {
       locationData:  locationData.length,
       visaIdData:    visaIdData.length,
       visasubIdData: visasubIdData.length,
@@ -57,24 +53,21 @@
     return { locationData, visaIdData, visasubIdData, categoryData };
   }
 
-  // ---------- 1.5) Number Of Members array ----------
+  // Number Of Members
   function getApplicantsNoData() {
     let arr = safeArray(window.applicantsNoData);
-    if (!arr.length) {
-      arr = extractArrayFromScripts("applicantsNoData");
-    }
+    if (!arr.length) arr = extractArrayFromScripts("applicantsNoData");
     log("[VT] applicantsNoData length:", arr.length);
     return arr;
   }
 
-  // ---------- 2) قراءة اختيارات popup ----------
+  // ---------- 2) popup choices ----------
   function loadPopupChoices() {
     return new Promise((resolve) => {
       if (!chrome?.storage?.local) {
         resolve({ locName: "", vsName: "", vsSubName: "", catName: "" });
         return;
       }
-
       chrome.storage.local.get(
         [
           "calendria_location_name",
@@ -96,7 +89,6 @@
     });
   }
 
-  // ---------- 2.5) عدد الممبرز ----------
   function loadMembersCount() {
     return new Promise((resolve) => {
       if (!chrome?.storage?.local) {
@@ -115,81 +107,61 @@
           }
         }
         if (!isFinite(n) || n <= 0) n = 0;
-        log("[VT] membersCount from storage/page:", n);
+        log("[VT] membersCount:", n);
         resolve(n);
       });
     });
   }
 
-  // ---------- 3) تحويل أسماء popup إلى IDs ----------
+  // ---------- 3) resolve IDs ----------
   function resolveIds(arrays, choices) {
     const { locationData, visaIdData, visasubIdData, categoryData } = arrays;
     const { locName, vsName, vsSubName, catName } = choices;
-
-    const result = {
-      locationId:    "",
-      visaTypeId:    "",
-      visaSubTypeId: "",
-      categoryId:    "",
-    };
+    const res = { locationId: "", visaTypeId: "", visaSubTypeId: "", categoryId: "" };
 
     if (!locationData.length || !visaIdData.length || !visasubIdData.length || !categoryData.length) {
-      warn("cannot resolve IDs, one of arrays is empty");
-      return result;
+      warn("resolveIds: some arrays empty");
+      return res;
     }
 
-    const loc = locationData.find(
-      (x) => String(x.Name || "").toLowerCase() === String(locName || "").toLowerCase()
-    );
-    if (!loc) { warn("location not found for", locName); return result; }
-    result.locationId = String(loc.Id || "");
+    const loc = locationData.find(x => String(x.Name || "").toLowerCase() === locName.toLowerCase());
+    if (!loc) { warn("location not found", locName); return res; }
+    res.locationId = String(loc.Id || "");
 
-    const vs = visaIdData.find(
-      (x) => String(x.Name || "").toLowerCase() === String(vsName || "").toLowerCase()
-    );
-    if (!vs) { warn("visaType not found for", vsName); return result; }
-    result.visaTypeId = String(vs.Id || "");
+    const vs = visaIdData.find(x => String(x.Name || "").toLowerCase() === vsName.toLowerCase());
+    if (!vs) { warn("visaType not found", vsName); return res; }
+    res.visaTypeId = String(vs.Id || "");
 
-    const vsSub = visasubIdData.find(
-      (x) => String(x.Name || "").toLowerCase() === String(vsSubName || "").toLowerCase()
-    );
-    if (!vsSub) { warn("visaSubType not found for", vsSubName); return result; }
-    result.visaSubTypeId = String(vsSub.Id || "");
+    const vsSub = visasubIdData.find(x => String(x.Name || "").toLowerCase() === vsSubName.toLowerCase());
+    if (!vsSub) { warn("visaSubType not found", vsSubName); return res; }
+    res.visaSubTypeId = String(vsSub.Id || "");
 
     const cat = categoryData.find(
-      (x) =>
-        String(x.LegalEntityId || "") === result.locationId &&
-        String(x.Name || "").toLowerCase() === String(catName || "").toLowerCase()
+      x =>
+        String(x.LegalEntityId || "") === res.locationId &&
+        String(x.Name || "").toLowerCase() === catName.toLowerCase()
     );
-    if (!cat) {
-      warn("category not found for", catName, "at locationId", result.locationId);
-      return result;
-    }
-    result.categoryId = String(cat.Id || "");
+    if (!cat) { warn("category not found", catName); return res; }
+    res.categoryId = String(cat.Id || "");
 
-    log("resolved IDs:", result);
-    return result;
+    log("resolved IDs:", res);
+    return res;
   }
 
-  // ---------- 4) إيجاد input لكل dropdown ظاهر ----------
+  // ---------- 4) find visible dropdown inputs ----------
   function findVisibleFieldInputs(form) {
     const elements = form.querySelectorAll(".mb-3");
-    let categoryId = null;
-    let locationId = null;
-    let visaTypeId = null;
-    let visaSubTypeId = null;
+    let categoryId = null, locationId = null, visaTypeId = null, visaSubTypeId = null;
 
-    elements.forEach((node) => {
-      const cs = window.getComputedStyle(node);
+    elements.forEach(node => {
+      const cs = getComputedStyle(node);
       if (cs.display === "none") return;
-
       const label  = node.querySelector("label");
       const select = node.querySelector("span.k-select");
       if (!label || !select) return;
 
       const labelText = (label.textContent || "").trim();
       const labelId   = label.getAttribute("for");
-
       if (!labelId) return;
 
       if (labelText.includes("Category"))           categoryId    = labelId;
@@ -198,49 +170,35 @@
       else if (labelText.includes("Visa Sub Type")) visaSubTypeId = labelId;
     });
 
-    const res = { locationId, visaTypeId, visaSubTypeId, categoryId };
-    log("visible field inputs:", res);
-    return res;
+    const out = { locationId, visaTypeId, visaSubTypeId, categoryId };
+    log("visible field inputs:", out);
+    return out;
   }
 
-  // Number Of Members input id
   function findMembersFieldInput(form) {
     const elements = form.querySelectorAll(".mb-3");
     let membersId = null;
-
-    elements.forEach((node) => {
-      const cs = window.getComputedStyle(node);
+    elements.forEach(node => {
+      const cs = getComputedStyle(node);
       if (cs.display === "none") return;
-
       const label  = node.querySelector("label");
       const select = node.querySelector("span.k-select");
       if (!label || !select) return;
-
       const labelText = (label.textContent || "").trim();
       const labelId   = label.getAttribute("for");
       if (!labelId) return;
-
       if (labelText.toLowerCase().includes("number of members")) {
         membersId = labelId;
       }
     });
-
-    if (membersId) {
-      log("[VT] found Number Of Members field id:", membersId);
-    } else {
-      log("[VT] Number Of Members field not found (maybe hidden?)");
-    }
+    if (membersId) log("[VT] Number Of Members field id:", membersId);
     return membersId;
   }
 
-  // ---------- 5) حقن قيمة في dropdown / input ----------
   function forceValueIntoField(id, value) {
     if (!id) return;
     const el = document.getElementById(id);
-    if (!el) {
-      warn("forceValueIntoField: element not found", id);
-      return;
-    }
+    if (!el) { warn("forceValueIntoField: not found", id); return; }
 
     let usedKendo = false;
     const $el = window.jQuery ? window.jQuery(el) : null;
@@ -252,53 +210,34 @@
         ddl.trigger("change");
         usedKendo = true;
       } catch (e) {
-        warn("kendoDropDownList.value error for", id, e);
+        warn("kendoDropDownList.value error", id, e);
       }
     } else {
       el.value = String(value);
     }
 
-    log("[VT] INJECT", {
-      elementId: id,
-      injectedValue: String(value),
-      kendo: usedKendo,
-    });
+    log("[VT] INJECT", { elementId: id, injectedValue: String(value), kendo: usedKendo });
   }
 
-  // ---------- 5.5) حقن عدد الممبرز ----------
   async function applyMembersField(form) {
     const membersCount = await loadMembersCount();
     if (!membersCount || membersCount < 2) {
-      log("[VT] membersCount < 2 → skipping members injection");
+      log("[VT] membersCount < 2 → skip");
       return;
     }
 
     const applicants = getApplicantsNoData();
-    if (!applicants.length) {
-      warn("[VT] applicantsNoData empty → cannot map members");
-      return;
-    }
+    if (!applicants.length) { warn("[VT] applicantsNoData empty"); return; }
 
     const label = membersCount + " Members";
-    const item = applicants.find(
-      (x) => String(x.Name || "").toLowerCase() === label.toLowerCase()
-    );
-    if (!item) {
-      warn("[VT] no applicantsNoData match for", label);
-      return;
-    }
+    const item = applicants.find(x => String(x.Name || "").toLowerCase() === label.toLowerCase());
+    if (!item) { warn("[VT] no applicantsNoData match for", label); return; }
 
     const value = item.Id || item.Value;
-    if (!value) {
-      warn("[VT] applicantsNoData match has no Id/Value:", item);
-      return;
-    }
+    if (!value) { warn("[VT] applicantsNoData match has no Id/Value"); return; }
 
     const membersId = findMembersFieldInput(form);
-    if (!membersId) {
-      warn("[VT] members field input not found, maybe not visible");
-      return;
-    }
+    if (!membersId) { warn("[VT] members field id not found"); return; }
 
     forceValueIntoField(membersId, value);
     log("[VT] members injected:", { membersId, value });
@@ -307,33 +246,17 @@
   // ---------- 6) delay ----------
   function loadDelayMs() {
     return new Promise((resolve) => {
-      if (!chrome?.storage?.local) {
-        resolve(0);
-        return;
-      }
-
+      if (!chrome?.storage?.local) { resolve(0); return; }
       chrome.storage.local.get(
         ["calendria_use_delays", "calendria_delay_visatype"],
         (res = {}) => {
-
           const master = res.calendria_use_delays === "on";
-
-          if (!master) {
-            log("[VT] Delay master OFF → sending instantly (0 ms)");
-            resolve(0);
-            return;
-          }
-
-          let raw = (res.calendria_delay_visatype || "")
-            .toString()
-            .trim()
-            .replace(",", ".");
+          if (!master) { log("[VT] delay master OFF"); resolve(0); return; }
+          let raw = (res.calendria_delay_visatype || "").toString().trim().replace(",", ".");
           let sec = parseFloat(raw);
-
           if (!isFinite(sec) || sec < 0) sec = 0;
-
           const ms = Math.round(sec * 1000);
-          log("[VT] Delay master ON → waiting", ms, "ms");
+          log("[VT] delay =", ms, "ms");
           resolve(ms);
         }
       );
@@ -347,7 +270,6 @@
       const txt = s.textContent || "";
       const idx = txt.indexOf("var submittedData=");
       if (idx === -1) continue;
-
       const sub = txt.slice(idx);
       const m = /var\s+submittedData\s*=\s*\{([\s\S]*?)\}\s*;/.exec(sub);
       if (!m || !m[1]) continue;
@@ -357,56 +279,48 @@
       const out = [];
       let mm;
       while ((mm = re.exec(body))) {
-        const name = mm[1];
-        const id   = mm[2];
-        out.push({ name, id });
+        out.push({ name: mm[1], id: mm[2] });
       }
       if (out.length) {
-        log("[VT] parsed submittedData map from page script:", out);
+        log("[VT] submittedData map len=", out.length);
         return out;
       }
     }
-    warn("[VT] could not parse submittedData map, fallback mode");
+    warn("[VT] submittedData map not found");
     return [];
   }
 
-  // ---------- 8) ResponseData = نفس منطق الموقع ----------
+  // ✅ نفس منطق الموقع
   function buildResponseDataObject(form) {
     const map = parseSubmittedDataSpec();
-
-    if (map.length) {
-      const obj = {};
-      for (let i = 0; i < map.length && i < 50; i++) {
-        const { name, id } = map[i];
-        const el = document.getElementById(id);
-        obj[name] = el && el.value != null ? String(el.value) : "";
-      }
-      log("[VT] ResponseData built from submittedData map:", obj);
+    const obj = {};
+    if (!map.length) {
+      log("[VT] ResponseData empty (no map)");
       return obj;
     }
-
-    const obj = {};
-    log("[VT] ResponseData empty (no submittedData map)");
+    for (let i = 0; i < map.length && i < 50; i++) {
+      const { name, id } = map[i];
+      const el = document.getElementById(id);
+      obj[name] = el && el.value != null ? String(el.value) : "";
+    }
+    log("[VT] ResponseData:", obj);
     return obj;
   }
 
-  // ---------- 9) AppointmentFor ----------
+  // ---------- 8) AppointmentFor ----------
   function readAppointmentForFromDom(form) {
     const hidden = form.querySelector('[name="AppointmentFor"]');
-    if (hidden && hidden.value) {
-      return String(hidden.value).trim();
-    }
+    if (hidden && hidden.value) return String(hidden.value).trim();
 
-    const familyChecked = form.querySelector('input[type="radio"][value="Family"]:checked');
-    const indivChecked  = form.querySelector('input[type="radio"][value="Individual"]:checked');
+    const famVal = form.querySelector('input[type="radio"][value="Family"]:checked');
+    const indVal = form.querySelector('input[type="radio"][value="Individual"]:checked');
+    if (famVal) return "Family";
+    if (indVal) return "Individual";
 
-    if (familyChecked) return "Family";
-    if (indivChecked)  return "Individual";
-
-    const familyOld = form.querySelector('input[type="radio"][id^="family"]:checked');
-    const selfOld   = form.querySelector('input[type="radio"][id^="self"]:checked');
-    if (familyOld) return "Family";
-    if (selfOld)   return "Individual";
+    const famId = form.querySelector('input[type="radio"][id^="family"]:checked');
+    const selfId = form.querySelector('input[type="radio"][id^="self"]:checked');
+    if (famId) return "Family";
+    if (selfId) return "Individual";
 
     return "";
   }
@@ -417,54 +331,63 @@
         resolve(readAppointmentForFromDom(form));
         return;
       }
-
       chrome.storage.local.get(["calendria_appointment_for"], (res = {}) => {
         const raw = (res.calendria_appointment_for || "").toString().trim().toLowerCase();
-
-        if (raw === "family") {
-          resolve("Family");
-        } else if (raw === "individual") {
-          resolve("Individual");
-        } else {
-          resolve(readAppointmentForFromDom(form));
-        }
+        if (raw === "family")      resolve("Family");
+        else if (raw === "individual") resolve("Individual");
+        else resolve(readAppointmentForFromDom(form));
       });
     });
   }
 
-  // ✅ نعيّن الراديو + الـ hidden الأصلي (#name)
-  function syncAppointmentForRadios(form, apptForVal) {
+  // 🆕 نحدد الانبت الأصلي لـ Appointment For بنفس طريقة location...
+  function findAppointmentForInputId(form) {
+    const map = parseSubmittedDataSpec();
+    for (const { id } of map) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      const block = el.closest(".mb-3");
+      if (!block) continue;
+      const label = block.querySelector("label");
+      if (!label) continue;
+      const txt = (label.textContent || "").toLowerCase();
+      if (txt.includes("appointment for")) {
+        log("[VT] AppointmentFor base input id:", id);
+        return id;
+      }
+    }
+    warn("[VT] AppointmentFor base input id not found via map");
+    return null;
+  }
+
+  // نضبط الراديو في الواجهة + الانبت الأصلي
+  function syncAppointmentFor(form, apptForVal) {
     if (!apptForVal) return;
 
-    // الراديو الهدف (عنده القيمة اللي بغينا)
+    // 1) الراديو اللي عندو value مناسبة
     const radio = form.querySelector('input[type="radio"][value="' + apptForVal + '"]');
-    if (!radio) {
-      log("[VT] no AppointmentFor radio found for", apptForVal);
-      return;
+    if (radio) {
+      const name = radio.name;
+      if (name) {
+        const group = form.querySelectorAll('input[type="radio"][name="' + name + '"]');
+        group.forEach(r => { r.checked = (r === radio); });
+      } else {
+        radio.checked = true;
+      }
     }
 
-    const groupName = radio.name || "";
-    if (groupName) {
-      // نخلي الراديو ديال نفس المجموعة ينعلم صح/خطأ
-      const groupRadios = form.querySelectorAll('input[type="radio"][name="' + groupName + '"]');
-      groupRadios.forEach((r) => {
-        r.checked = (r === radio);
-      });
-
-      // hidden الأصلي: id = name ديال الراديو
-      const hidden = document.getElementById(groupName);
-      if (hidden) {
-        hidden.value = apptForVal;
-        log("[VT] set hidden AppointmentFor #" + groupName + " =", apptForVal);
-      } else {
-        log("[VT] hidden AppointmentFor #" + groupName + " not found");
+    // 2) الانبت الأصلي (hidden/text) داخل بلوك "Appointment For"
+    const baseId = findAppointmentForInputId(form);
+    if (baseId) {
+      const baseEl = document.getElementById(baseId);
+      if (baseEl) {
+        baseEl.value = apptForVal;
+        log("[VT] set AppointmentFor base #" + baseId + " =", apptForVal);
       }
-    } else {
-      radio.checked = true;
     }
   }
 
-  // ---------- 10) POST ----------
+  // ---------- 9) POST ----------
   async function buildPayloadAndSend(form) {
     if (window.__cal_vt_sent) {
       warn("already sent once, skipping");
@@ -472,11 +395,9 @@
     }
     window.__cal_vt_sent = true;
 
-    const respObj = buildResponseDataObject(form);
+    const respObj   = buildResponseDataObject(form);
     const respInput = form.querySelector('[name="ResponseData"]');
-    if (respInput) {
-      respInput.value = JSON.stringify(respObj);
-    }
+    if (respInput) respInput.value = JSON.stringify(respObj);
 
     const dataInput  = form.querySelector('[name="Data"]');
     const dsInput    = form.querySelector('[name="DataSource"]');
@@ -490,7 +411,7 @@
 
     const fd = new FormData(form);
 
-    // ما نلمسوش AppointmentFor هنا
+    // لا نمس AppointmentFor هنا
     fd.set("Data", dataVal);
     fd.set("DataSource", dsVal);
     fd.set("ReCaptchaToken", recVal);
@@ -502,12 +423,11 @@
 
     const objPreview = {};
     params.forEach((v, k) => { objPreview[k] = v; });
-
     log("[VT] FULL BUILT PAYLOAD OBJECT:", objPreview);
     log("[VT] FULL BUILT PAYLOAD RAW:", params.toString());
 
     const delayMs = await loadDelayMs();
-    log("[VT] waiting", delayMs, "ms before custom POST...");
+    log("[VT] waiting", delayMs, "ms before POST...");
 
     setTimeout(async () => {
       const url = "/MAR/Appointment/VisaType";
@@ -517,85 +437,71 @@
         "Cache-Control": "max-age=0",
         "Upgrade-Insecure-Requests": "1"
       };
-
       try {
-        log("[VT] sending custom POST to", url);
-
+        log("[VT] sending POST to", url);
         const resp = await fetch(url, {
           method: "POST",
           headers,
           body: params.toString(),
           credentials: "include",
-          redirect: "manual"
+          redirect: "manual",
         });
+        log("[VT] POST status:", resp.status);
 
-        log("[VT] custom POST status:", resp.status);
-
-        const qs = new URLSearchParams(window.location.search || "");
+        const qs = new URLSearchParams(location.search || "");
         const dataFromUrl = qs.get("data") || "";
         const slotData = dataVal || dataFromUrl;
-
-        if (!slotData) {
-          warn("[VT] no Data token found (input + URL) → cannot build SlotSelection URL");
-          return;
-        }
+        if (!slotData) { warn("[VT] no Data token to go SlotSelection"); return; }
 
         if (chrome?.storage?.local) {
           chrome.storage.local.get(["calendria_location_name"], (res = {}) => {
             const rawLoc   = (res.calendria_location_name || "").toString().trim();
             const locUpper = rawLoc.toUpperCase();
-
             const slotUrl =
               "/MAR/Appointment/SlotSelection?data=" +
               encodeURIComponent(slotData) +
               (locUpper ? "&loc=" + encodeURIComponent(locUpper) : "");
-
-            log("[VT] redirect to SlotSelection →", slotUrl);
+            log("[VT] redirect →", slotUrl);
             location.href = slotUrl;
           });
         } else {
           const slotUrl =
             "/MAR/Appointment/SlotSelection?data=" +
             encodeURIComponent(slotData);
-          log("[VT] redirect to SlotSelection (no storage) →", slotUrl);
+          log("[VT] redirect →", slotUrl);
           location.href = slotUrl;
         }
-
       } catch (e) {
         console.error(LOG, "error in custom POST", e);
       }
     }, delayMs);
   }
 
-  // ---------- 11) main ----------
+  // ---------- 10) main ----------
   async function main() {
     if (!isVisaTypePage()) return;
-
     log("started");
 
     const form =
       document.getElementById("visatypeform") || document.querySelector("form");
-    if (!form) {
-      warn("no form found in main document");
-      return;
-    }
+    if (!form) { warn("no form found"); return; }
 
-    form.addEventListener("submit", (e) => {
+    form.addEventListener("submit", e => {
       e.preventDefault();
-      warn("native form submit intercepted (custom CALENDRIA flow will send instead)");
+      warn("native form submit intercepted");
     });
 
-    const arrays   = getPageArrays();
-    const choices  = await loadPopupChoices();
+    const arrays  = getPageArrays();
+    const choices = await loadPopupChoices();
 
     if (!choices.locName && !choices.vsName && !choices.vsSubName && !choices.catName) {
-      warn("choices empty → nothing to fill / send");
+      warn("choices empty → nothing to do");
       return;
     }
 
     const ids = resolveIds(arrays, choices);
     if (!ids.locationId || !ids.visaTypeId || !ids.visaSubTypeId || !ids.categoryId) {
-      warn("could not resolve all IDs, aborting send");
+      warn("missing IDs, abort");
       return;
     }
 
@@ -605,18 +511,15 @@
     if (fields.visaSubTypeId) forceValueIntoField(fields.visaSubTypeId, ids.visaSubTypeId);
     if (fields.categoryId)    forceValueIntoField(fields.categoryId,    ids.categoryId);
 
-    // AppointmentFor (Individual / Family) من popup
     const apptForVal = await getAppointmentForValue(form);
-    syncAppointmentForRadios(form, apptForVal);
+    syncAppointmentFor(form, apptForVal);
 
-    // نعطي شوية وقت بسيط باش أي logic داخلي يكمل
-    await new Promise((r) => setTimeout(r, 150));
-
-    // Number Of Members من popup → dropdown
+    // نعطي شوية وقت بسيط باش أي logic داخلي يكمل، ثم نحقن members
+    await new Promise(r => setTimeout(r, 150));
     await applyMembersField(form);
 
     await buildPayloadAndSend(form);
-    log("[VT] fields filled + members + payload built, custom POST scheduled.");
+    log("[VT] done (fields + AppointmentFor + members + POST scheduled)");
   }
 
   if (document.readyState === "complete" || document.readyState === "interactive") {
