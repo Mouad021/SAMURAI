@@ -84,10 +84,10 @@
         ],
         (res = {}) => {
           const choices = {
-            locName:  (res.calendria_location_name  || "").trim(),
-            vsName:   (res.calendria_visatype_name  || "").trim(),
-            vsSubName:(res.calendria_visasub_name   || "").trim(),
-            catName:  (res.calendria_category_name  || "").trim(),
+            locName:   (res.calendria_location_name || "").trim(),
+            vsName:    (res.calendria_visatype_name || "").trim(),
+            vsSubName: (res.calendria_visasub_name || "").trim(),
+            catName:   (res.calendria_category_name || "").trim(),
           };
           log("popup choices:", choices);
           resolve(choices);
@@ -100,7 +100,6 @@
   function loadMembersCount() {
     return new Promise((resolve) => {
       if (!chrome?.storage?.local) {
-        // fallback: من سكربت الصفحة
         let n = 0;
         if (typeof window.numberofapplicants !== "undefined") {
           n = parseInt(window.numberofapplicants, 10);
@@ -128,10 +127,10 @@
     const { locName, vsName, vsSubName, catName } = choices;
 
     const result = {
-      locationId:   "",
-      visaTypeId:   "",
-      visaSubTypeId:"",
-      categoryId:   "",
+      locationId:    "",
+      visaTypeId:    "",
+      visaSubTypeId: "",
+      categoryId:    "",
     };
 
     if (!locationData.length || !visaIdData.length || !visasubIdData.length || !categoryData.length) {
@@ -193,14 +192,14 @@
 
       if (!labelId) return;
 
-      if (labelText.includes("Category"))           categoryId   = labelId;
-      else if (labelText.includes("Location"))      locationId   = labelId;
-      else if (labelText.includes("Visa Type"))     visaTypeId   = labelId;
+      if (labelText.includes("Category"))           categoryId    = labelId;
+      else if (labelText.includes("Location"))      locationId    = labelId;
+      else if (labelText.includes("Visa Type"))     visaTypeId    = labelId;
       else if (labelText.includes("Visa Sub Type")) visaSubTypeId = labelId;
     });
 
     const res = { locationId, visaTypeId, visaSubTypeId, categoryId };
-    log("visible field inputs (runVisaTypeFilling style):", res);
+    log("visible field inputs:", res);
     return res;
   }
 
@@ -266,18 +265,35 @@
     });
   }
 
-  // قراءة القيمة من الـ DOM فقط (بدون مخزن)
+  // -------- AppointmentFor: قراءة من DOM --------
   function readAppointmentForFromDom(form) {
+    // 1) hidden AppointmentFor إذا كاين
     const hidden = form.querySelector('[name="AppointmentFor"]');
     if (hidden && hidden.value) {
-      return String(hidden.value).trim();
+      const v = String(hidden.value).trim();
+      if (v) return v;
     }
 
-    const familyChecked = form.querySelector('input[type="radio"][id^="family"]:checked');
-    const selfChecked   = form.querySelector('input[type="radio"][id^="self"]:checked');
+    // 2) الراديوهات الجديدة: value = "Family" / "Individual"
+    const familyChecked = form.querySelector(
+      'input[type="radio"][value="Family"]:checked'
+    );
+    const indivChecked = form.querySelector(
+      'input[type="radio"][value="Individual"]:checked'
+    );
 
     if (familyChecked) return "Family";
-    if (selfChecked)   return "Individual";
+    if (indivChecked)  return "Individual";
+
+    // 3) fallback للـ IDs القديمة
+    const familyById = form.querySelector(
+      'input[type="radio"][id^="family"]:checked'
+    );
+    const selfById = form.querySelector(
+      'input[type="radio"][id^="self"]:checked'
+    );
+    if (familyById) return "Family";
+    if (selfById)   return "Individual";
 
     return "";
   }
@@ -298,16 +314,14 @@
         } else if (raw === "individual") {
           resolve("Individual");
         } else {
-          // fallback: ما اختارش فالإضافة → ناخدو من الصفحة
           resolve(readAppointmentForFromDom(form));
         }
       });
     });
   }
 
-  // ---------- 5.5) حقن Number Of Members ----------
+  // ---------- 5.5) حقن Number Of Members (فقط إذا Family) ----------
   async function applyMembersField(form) {
-    // ✅ أولاً: نتأكد أن AppointmentFor فعلاً Family
     const apptFor = await getAppointmentForValue(form);
     if (apptFor !== "Family") {
       log("[VT] AppointmentFor != Family → skipping members injection");
@@ -365,7 +379,6 @@
 
           const master = res.calendria_use_delays === "on";
 
-          // إذا كان master مطفي → بدون تأخير
           if (!master) {
             log("[VT] Delay master OFF → sending instantly (0 ms)");
             resolve(0);
@@ -467,6 +480,27 @@
     return obj;
   }
 
+  // ---------- 8.5) مزامنة الراديو ديال AppointmentFor ----------
+  function syncAppointmentForRadios(form, apptForVal) {
+    if (!apptForVal) return;
+
+    const radios = form.querySelectorAll(
+      'input[type="radio"][value="Family"], ' +
+      'input[type="radio"][value="Individual"]'
+    );
+
+    radios.forEach((r) => {
+      if (apptForVal === "Family" && r.value === "Family") {
+        r.checked = true;
+      } else if (apptForVal === "Individual" && r.value === "Individual") {
+        r.checked = true;
+      }
+    });
+
+    const hidden = form.querySelector('[name="AppointmentFor"]');
+    if (hidden) hidden.value = apptForVal;
+  }
+
   // ---------- 9) بناء البايلود و الإرسال بـ fetch ----------
   async function buildPayloadAndSend(form) {
     if (window.__cal_vt_sent) {
@@ -491,11 +525,16 @@
     const tokenVal = tokenInput ? tokenInput.value : "";
     const recVal   = recInput   ? recInput.value   : "";
 
+    // 1) نجيب AppointmentFor ونزامن الراديو/hidden
+    const apptForVal = await getAppointmentForValue(form);
+    syncAppointmentForRadios(form, apptForVal);
+
+    // 2) دابا نبني FormData باش يشمل الاسم العشوائي ديال الراديو (afnyulwebee=Family ...)
     const fd = new FormData(form);
 
+    // 3) نضبط الحقول الخاصة
     fd.set("Data", dataVal);
     fd.set("DataSource", dsVal);
-    const apptForVal = await getAppointmentForValue(form);
     fd.set("AppointmentFor", apptForVal);
     fd.set("ReCaptchaToken", recVal);
     fd.set("__RequestVerificationToken", tokenVal);
@@ -546,7 +585,7 @@
 
         if (chrome?.storage?.local) {
           chrome.storage.local.get(["calendria_location_name"], (res = {}) => {
-            const rawLoc  = (res.calendria_location_name || "").toString().trim();
+            const rawLoc   = (res.calendria_location_name || "").toString().trim();
             const locUpper = rawLoc.toUpperCase();
 
             const slotUrl =
@@ -604,12 +643,12 @@
     }
 
     const fields = findVisibleFieldInputs(form);
-    if (fields.locationId)     forceValueIntoField(fields.locationId,   ids.locationId);
-    if (fields.visaTypeId)     forceValueIntoField(fields.visaTypeId,   ids.visaTypeId);
-    if (fields.visaSubTypeId)  forceValueIntoField(fields.visaSubTypeId,ids.visaSubTypeId);
-    if (fields.categoryId)     forceValueIntoField(fields.categoryId,   ids.categoryId);
+    if (fields.locationId)    forceValueIntoField(fields.locationId,    ids.locationId);
+    if (fields.visaTypeId)    forceValueIntoField(fields.visaTypeId,    ids.visaTypeId);
+    if (fields.visaSubTypeId) forceValueIntoField(fields.visaSubTypeId, ids.visaSubTypeId);
+    if (fields.categoryId)    forceValueIntoField(fields.categoryId,    ids.categoryId);
 
-    // هنا نطبق نفس المنطق على Number Of Members (ولكن فقط إذا Family)
+    // members (فقط إذا Family)
     await applyMembersField(form);
 
     await buildPayloadAndSend(form);
