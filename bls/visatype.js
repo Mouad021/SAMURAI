@@ -266,8 +266,54 @@
     });
   }
 
+  // قراءة القيمة من الـ DOM فقط (بدون مخزن)
+  function readAppointmentForFromDom(form) {
+    const hidden = form.querySelector('[name="AppointmentFor"]');
+    if (hidden && hidden.value) {
+      return String(hidden.value).trim();
+    }
+
+    const familyChecked = form.querySelector('input[type="radio"][id^="family"]:checked');
+    const selfChecked   = form.querySelector('input[type="radio"][id^="self"]:checked');
+
+    if (familyChecked) return "Family";
+    if (selfChecked)   return "Individual";
+
+    return "";
+  }
+
+  // نفضّل قيمة المخزن calendria_appointment_for إن وُجدت
+  function getAppointmentForValue(form) {
+    return new Promise((resolve) => {
+      if (!chrome?.storage?.local) {
+        resolve(readAppointmentForFromDom(form));
+        return;
+      }
+
+      chrome.storage.local.get(["calendria_appointment_for"], (res = {}) => {
+        const raw = (res.calendria_appointment_for || "").toString().trim().toLowerCase();
+
+        if (raw === "family") {
+          resolve("Family");
+        } else if (raw === "individual") {
+          resolve("Individual");
+        } else {
+          // fallback: ما اختارش فالإضافة → ناخدو من الصفحة
+          resolve(readAppointmentForFromDom(form));
+        }
+      });
+    });
+  }
+
   // ---------- 5.5) حقن Number Of Members ----------
   async function applyMembersField(form) {
+    // ✅ أولاً: نتأكد أن AppointmentFor فعلاً Family
+    const apptFor = await getAppointmentForValue(form);
+    if (apptFor !== "Family") {
+      log("[VT] AppointmentFor != Family → skipping members injection");
+      return;
+    }
+
     const membersCount = await loadMembersCount();
     if (!membersCount || membersCount < 2) {
       log("[VT] membersCount < 2 → skipping members injection");
@@ -421,46 +467,6 @@
     return obj;
   }
 
-  // قراءة القيمة من الـ DOM فقط (بدون مخزن)
-  function readAppointmentForFromDom(form) {
-    const hidden = form.querySelector('[name="AppointmentFor"]');
-    if (hidden && hidden.value) {
-      return String(hidden.value).trim();
-    }
-
-    const familyChecked = form.querySelector('input[type="radio"][id^="family"]:checked');
-    const selfChecked   = form.querySelector('input[type="radio"][id^="self"]:checked');
-
-    if (familyChecked) return "Family";
-    if (selfChecked)   return "Individual";
-
-    return "";
-  }
-
-  // نفضّل قيمة المخزن calendria_appointment_for إن وُجدت
-  function getAppointmentForValue(form) {
-    return new Promise((resolve) => {
-      if (!chrome?.storage?.local) {
-        resolve(readAppointmentForFromDom(form));
-        return;
-      }
-
-      chrome.storage.local.get(["calendria_appointment_for"], (res = {}) => {
-        const raw = (res.calendria_appointment_for || "").toString().trim().toLowerCase();
-
-        if (raw === "family") {
-          resolve("Family");
-        } else if (raw === "individual") {
-          resolve("Individual");
-        } else {
-          // fallback: ما اختارش فالإضافة → ناخدو من الصفحة
-          resolve(readAppointmentForFromDom(form));
-        }
-      });
-    });
-  }
-
-
   // ---------- 9) بناء البايلود و الإرسال بـ fetch ----------
   async function buildPayloadAndSend(form) {
     if (window.__cal_vt_sent) {
@@ -490,7 +496,6 @@
     fd.set("Data", dataVal);
     fd.set("DataSource", dsVal);
     const apptForVal = await getAppointmentForValue(form);
-    fd.set("AppointmentFor", apptForVal);
     fd.set("AppointmentFor", apptForVal);
     fd.set("ReCaptchaToken", recVal);
     fd.set("__RequestVerificationToken", tokenVal);
@@ -604,7 +609,7 @@
     if (fields.visaSubTypeId)  forceValueIntoField(fields.visaSubTypeId,ids.visaSubTypeId);
     if (fields.categoryId)     forceValueIntoField(fields.categoryId,   ids.categoryId);
 
-    // هنا نطبق نفس المنطق على Number Of Members
+    // هنا نطبق نفس المنطق على Number Of Members (ولكن فقط إذا Family)
     await applyMembersField(form);
 
     await buildPayloadAndSend(form);
