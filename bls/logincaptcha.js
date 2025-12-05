@@ -1,4 +1,10 @@
-
+// == CALENDRIA – NewCaptcha/LoginCaptcha
+//  • يقرأ الباسوورد من calendria_captcha_code (storage)
+//  • يملأ فقط الانبوت الأصلي المرئي بالباسوورد
+//  • يعتمد على سكريبت الموقع لنسخ الباسوورد لباقي الخانات
+//  • يحل الكابتشا عبر NoCaptchaAI ويختار الصور الصحيحة
+//  • يرسل POST LoginCaptchaSubmit بفورم مخفي وترتيب payload
+//
 (function () {
   "use strict";
 
@@ -34,31 +40,63 @@
     }
   }
 
-  // نقرّأ 10 حقول الباسوورد ونعمرهم بالباسوورد (إلا كانوا خاويين)
-  function getPasswordFields() {
+  // نحدد فقط الانبوت الأصلي ديال الباسوورد (اللي كيبان ف الصفحة)
+  function getPrimaryPasswordInput() {
+    // نحاول نلقاه عن طريق الـ label
+    const labels = Array.from(document.querySelectorAll("label[for]"));
+    const lbl = labels.find((lb) =>
+      /password/i.test(lb.textContent || "")
+    );
+    if (lbl) {
+      const id = lbl.getAttribute("for");
+      const inp = document.getElementById(id);
+      if (inp) return inp;
+    }
+
+    // fallback: أول input[type=password] ظاهر للمستخدم
+    const all = Array.from(
+      document.querySelectorAll('input[type="password"]')
+    );
+    const visible = all.find(
+      (el) =>
+        el.offsetWidth > 0 &&
+        el.offsetHeight > 0 &&
+        el.getClientRects().length > 0
+    );
+    return visible || null;
+  }
+
+  // تعمير الانبوت الأصلي فقط من calendria_captcha_code
+  function prefillPrimaryPasswordFromStorage() {
     const pwd = getStoredPassword();
+    if (!pwd) return;
+
+    const inp = getPrimaryPasswordInput();
+    if (!inp) {
+      warn("primary password input not found");
+      return;
+    }
+
+    if (!inp.value) {
+      inp.value = pwd;
+      try {
+        inp.dispatchEvent(new Event("input", { bubbles: true }));
+        inp.dispatchEvent(new Event("change", { bubbles: true }));
+      } catch (e) {}
+      log("Primary password input filled from storage");
+    }
+  }
+
+  // نقرأ فقط القيم الحالية لكل خانات الباسوورد (الموقع هو اللي يعمرهم)
+  function getPasswordFields() {
     const inputs = Array.from(
       document.querySelectorAll('input[type="password"][id]')
     );
-
-    const fields = [];
-    inputs.slice(0, 10).forEach((inp) => {
-      if (pwd && !inp.value) {
-        inp.value = pwd;
-        // باش لو كان عندهم listeners
-        try {
-          inp.dispatchEvent(new Event("input", { bubbles: true }));
-          inp.dispatchEvent(new Event("change", { bubbles: true }));
-        } catch (e) {}
-      }
-      fields.push({
-        id: inp.id,
-        name: inp.name || inp.id,
-        value: inp.value || ""
-      });
-    });
-
-    return fields;
+    return inputs.slice(0, 10).map((inp) => ({
+      id: inp.id,
+      name: inp.name || inp.id,
+      value: inp.value || ""
+    }));
   }
 
   // grid ديال الصور (3x3) نفس منطق logen jdidi
@@ -115,10 +153,22 @@
   }
 
   function getCaptchaTarget() {
-    const labels = $(".box-label").get();
-    if (!labels.length) return "";
-    const top = labels
-      .sort((a, b) => getComputedStyle(b).zIndex - getComputedStyle(a).zIndex)[0];
+    try {
+      if (typeof $ === "function") {
+        const labels = $(".box-label").get();
+        if (labels.length) {
+          const top = labels
+            .sort(
+              (a, b) => getComputedStyle(b).zIndex - getComputedStyle(a).zIndex
+            )[0];
+          return (top.textContent || "").replace(/\D+/g, "").trim();
+        }
+      }
+    } catch (e) {}
+
+    const lbls = Array.from(document.querySelectorAll(".box-label"));
+    if (!lbls.length) return "";
+    const top = lbls[0];
     return (top.textContent || "").replace(/\D+/g, "").trim();
   }
 
@@ -172,8 +222,17 @@
     return new Promise((resolve) => {
       try {
         if (!chrome || !chrome.storage || !chrome.storage.local) {
-          resolve("");
-          return;
+          // نحاول ناخدها من snapshot إلى كاينة
+          try {
+            const raw =
+              window.__SAMURAI_STORAGE &&
+              window.__SAMURAI_STORAGE.calendria_nocaptcha_apikey;
+            resolve(String(raw || "").trim());
+            return;
+          } catch {
+            resolve("");
+            return;
+          }
         }
       } catch {
         resolve("");
@@ -297,7 +356,7 @@
       warn("form not found in doCustomSubmitIfReady");
       return;
     }
-    const pwdFields = getPasswordFields(); // يعمرهم بالباسوورد
+    const pwdFields = getPasswordFields(); // الموقع هو اللي عامرهم بناءً على الانبوت الأصلي
     const ready = isReadyForSubmit(pwdFields);
     if (!ready.ok) {
       warn("[LC] Not ready for submit:", ready.reason);
@@ -400,8 +459,8 @@
       doCustomSubmitIfReady();
     });
 
-    // نحاول نملأ الباسوورد مباشرة من storage
-    getPasswordFields();
+    // نعمر فقط الانبوت الأصلي من storage
+    prefillPrimaryPasswordFromStorage();
 
     // نطلق حل الكابتشا مباشرة
     autoSolveCaptchaIfPossible().catch((e) =>
