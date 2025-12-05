@@ -533,34 +533,58 @@
   function removePremiumAndFamilyModals() {
     if (!location.pathname.toLowerCase().includes("/mar/appointment/visatype"))
       return;
-
+  
+    // تنظيف الأوفرلاي ديال البوتستراب
+    function cleanupModalOverlay() {
+      // نحيد جميع الخلفيات السوداء
+      document.querySelectorAll(".modal-backdrop").forEach(b => b.remove());
+      // نحاول نحيد أي div.modal باقّي ظاهر ومغطي الصفحة
+      document.querySelectorAll(".modal.show, .modal[style*='display: block']").forEach(m => {
+        m.remove();
+      });
+  
+      // body: نحيد class و styles ديال المودال
+      document.body.classList.remove("modal-open");
+      if (document.body.style.overflow === "hidden") {
+        document.body.style.overflow = "";
+      }
+      if (document.body.style.paddingRight) {
+        document.body.style.paddingRight = "";
+      }
+    }
+  
     function removeModalByTitle(titleText) {
-      const allModals = document.querySelectorAll(".modal-content");
-      for (const modal of allModals) {
-        const header = modal.querySelector(".modal-header h6, .modal-header .modal-title");
+      const allContents = document.querySelectorAll(".modal-content");
+      for (const content of allContents) {
+        const header = content.querySelector(".modal-header h6, .modal-header .modal-title");
         if (!header) continue;
-
+  
         const txt = (header.innerText || "").trim().toLowerCase();
         if (txt.includes(titleText.toLowerCase())) {
+          const wrapper = content.closest(".modal") || content;
           console.log("%c[VT] Removed modal:", "color:red;font-weight:bold;", txt);
-          modal.remove();
+          wrapper.remove();
         }
       }
     }
-
+  
     // إزالة المودالين مباشرة
     removeModalByTitle("premium confirmation");
     removeModalByTitle("family appointment");
-
+    cleanupModalOverlay();
+  
     // مراقبة DOM لأي ظهور جديد بعد AJAX
     const observer = new MutationObserver(() => {
       removeModalByTitle("premium confirmation");
       removeModalByTitle("family appointment");
+      cleanupModalOverlay();
     });
-
+  
     observer.observe(document.body, { childList: true, subtree: true });
   }
-
+  
   removePremiumAndFamilyModals();
 
+
 })();
+
