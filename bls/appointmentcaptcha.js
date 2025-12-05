@@ -231,7 +231,7 @@
       return { ok: false, reason: "missing Data" };
     if (!clientVal)
       return { ok: false, reason: "missing ClientData" };
-    if (selTokens.length <= 3)
+    if (selTokens.length <= 0)
       return { ok: false, reason: "not enough selected images" };
 
     return { ok: true, reason: "" };
