@@ -1,10 +1,4 @@
-// == CALENDRIA – NewCaptcha/LoginCaptcha
-//  • يقرأ الباسوورد من calendria_captcha_code (storage)
-//  • يملأ فقط الانبوت الأصلي المرئي بالباسوورد
-//  • يعتمد على سكريبت الموقع لنسخ الباسوورد لباقي الخانات إذا وُجد
-//  • يحل الكابتشا عبر NoCaptchaAI ويختار الصور الصحيحة
-//  • يرسل POST LoginCaptchaSubmit بفورم مخفي وترتيب payload
-//
+
 (function () {
   "use strict";
 
@@ -290,88 +284,102 @@
   // =============== POST custom ===============
   let __sent = false;
 
-  function buildAndSubmit(form, pwdFields) {
-    if (__sent) {
-      warn("buildAndSubmit called twice, skipping");
-      return;
+    // =============== POST custom ===============
+    let __sent = false;
+  
+    function buildAndSubmit(form, pwdFields) {
+      if (__sent) {
+        warn("buildAndSubmit called twice, skipping");
+        return;
+      }
+      __sent = true;
+  
+      pwdFields = pwdFields || getPasswordFields();
+  
+      const responseData = {};
+      const fieldNames   = [];
+  
+      function getVal(selector) {
+        const el = form.querySelector(selector);
+        return el && el.value != null ? String(el.value) : "";
+      }
+  
+      const idVal        = getVal('input[name="Id"]');
+      const returnUrlVal = getVal('input[name="ReturnUrl"]');
+      const paramVal     = getVal('input[name="Param"]');
+      const captchaText  = getVal('input[name="CaptchaText"]');
+      const tokenVal     = getVal('input[name="__RequestVerificationToken"]');
+  
+      const selectedImagesVal = buildSelectedImagesValue();
+  
+      const actionAttr =
+        form.getAttribute("action") || "/MAR/NewCaptcha/LoginCaptchaSubmit";
+      const actionUrl = actionAttr.startsWith("http")
+        ? actionAttr
+        : location.origin + actionAttr;
+  
+      // ⬅️ نبني body بنفس الترتيب باستعمال URLSearchParams
+      const params = new URLSearchParams();
+  
+      function appendField(name, value) {
+        params.append(name, value == null ? "" : String(value));
+      }
+  
+      // 1) جميع حقول الباسوورد (حتى لو بعضهم فارغ)
+      pwdFields.forEach((f) => {
+        fieldNames.push(f.name);
+        responseData[f.name] = f.value;
+        appendField(f.name, f.value);
+      });
+  
+      // 2) SelectedImages
+      appendField("SelectedImages", selectedImagesVal);
+  
+      // 3) Id
+      appendField("Id", idVal);
+  
+      // 4) ReturnUrl
+      appendField("ReturnUrl", returnUrlVal);
+  
+      // 5) ResponseData JSON
+      appendField("ResponseData", JSON.stringify(responseData));
+  
+      // 6) Param
+      appendField("Param", paramVal);
+  
+      // 7) CaptchaText
+      appendField("CaptchaText", captchaText);
+  
+      // 8) التوكن في الأخير
+      if (tokenVal) appendField("__RequestVerificationToken", tokenVal);
+  
+      log("Custom fetch POST →", actionUrl);
+      log("Custom payload fields:", fieldNames);
+  
+      // ⬅️ نرسل POST عن طريق fetch بلا تنقل
+      fetch(actionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: params.toString(),
+        credentials: "same-origin",
+        redirect: "manual" // مايتبعش 302
+      })
+        .then((resp) => {
+          log("LoginCaptchaSubmit fetch status:", resp.status);
+          // مباشرة نمشيو لصفحة NewAppointment
+          const targetUrl =
+            "https://www.blsspainmorocco.net/MAR/appointment/newappointment";
+          log("Redirecting manually to:", targetUrl);
+          window.location.href = targetUrl;
+        })
+        .catch((err) => {
+          __sent = false; // في حالة الخطأ نسمحو بمحاولة ثانية
+          console.error(LOG, "fetch LoginCaptchaSubmit error:", err);
+        });
     }
-    __sent = true;
 
-    pwdFields = pwdFields || getPasswordFields();
-
-    const responseData = {};
-    const fieldNames   = [];
-
-    function getVal(selector) {
-      const el = form.querySelector(selector);
-      return el && el.value != null ? String(el.value) : "";
-    }
-
-    const idVal        = getVal('input[name="Id"]');
-    const returnUrlVal = getVal('input[name="ReturnUrl"]');
-    const paramVal     = getVal('input[name="Param"]');
-    const captchaText  = getVal('input[name="CaptchaText"]');
-    const tokenVal     = getVal('input[name="__RequestVerificationToken"]');
-
-    const selectedImagesVal = buildSelectedImagesValue();
-
-    const actionUrl =
-      form.getAttribute("action") || "/MAR/NewCaptcha/LoginCaptchaSubmit";
-
-    const tmpForm = document.createElement("form");
-    tmpForm.method = "POST";
-    tmpForm.action = actionUrl;
-    tmpForm.style.display = "none";
-
-    function appendField(name, value) {
-      const inp = document.createElement("input");
-      inp.type  = "hidden";
-      inp.name  = name;
-      inp.value = value;
-      tmpForm.appendChild(inp);
-    }
-
-    // 1) كل الحقول اللي لقيناهم (حتى لو بعضهم فارغ)
-    pwdFields.forEach((f) => {
-      fieldNames.push(f.name);
-      responseData[f.name] = f.value;
-      appendField(f.name, f.value);
-    });
-
-    // 2) SelectedImages
-    appendField("SelectedImages", selectedImagesVal);
-
-    // 3) Id
-    appendField("Id", idVal);
-
-    // 4) ReturnUrl
-    appendField("ReturnUrl", returnUrlVal);
-
-    // 5) ResponseData JSON
-    appendField("ResponseData", JSON.stringify(responseData));
-
-    // 6) Param
-    appendField("Param", paramVal);
-
-    // 7) CaptchaText
-    appendField("CaptchaText", captchaText);
-
-    // 8) التوكن في الأخير
-    if (tokenVal) appendField("__RequestVerificationToken", tokenVal);
-
-    log("Custom form action:", actionUrl);
-    log("Custom payload:", {
-      pwdFields: fieldNames,
-      SelectedImages: selectedImagesVal,
-      Id: idVal,
-      ReturnUrl: returnUrlVal,
-      Param: paramVal,
-      CaptchaText: captchaText
-    });
-
-    document.body.appendChild(tmpForm);
-    tmpForm.submit();
-  }
 
   async function doCustomSubmitIfReady() {
     const form = getForm();
