@@ -1,4 +1,4 @@
-// == CALENDRIA AppointmentCaptcha helper (NoCaptchaAI + form.submit) ==
+// == CALENDRIA AppointmentCaptcha helper (NoCaptchaAI + fetch redirect control) ==
 (() => {
   "use strict";
 
@@ -36,9 +36,9 @@
     return el && el.value ? String(el.value) : "";
   }
 
-  // نجمع باقي ال hidden inputs (فقط باش نعاينهم فالـ log)
-  function getExtraInputsPreview() {
-    const extras = {};
+  // باقي الـ hidden inputs فقط للـ preview
+  function getExtraInputs() {
+    const extras = [];
     const ignore = new Set([
       "__RequestVerificationToken",
       "SelectedImages",
@@ -50,15 +50,14 @@
       .forEach((inp) => {
         const name = inp.name;
         if (!name || ignore.has(name)) return;
-        extras[name] = inp.value || "";
+        extras.push({ name, value: inp.value || "" });
       });
     return extras;
   }
 
-  // ===================== helpers: captcha grid & target =====================
+  // ===================== captcha grid & target =====================
 
   function getCaptchaGrid() {
-    // نفس منطق logincaptcha: jQuery إذا كان، وإلا DOM عادي
     try {
       if (typeof $ === "function" && $.fn && $.fn.jquery) {
         return $(":has(> .captcha-img):visible")
@@ -80,7 +79,7 @@
           .map((el) => el.firstElementChild)
           .filter(Boolean);
       }
-    } catch (e) {}
+    } catch {}
 
     const containers = Array.from(document.querySelectorAll("*")).filter(
       (el) => {
@@ -125,7 +124,7 @@
           return (top.textContent || "").replace(/\D+/g, "").trim();
         }
       }
-    } catch (e) {}
+    } catch {}
 
     const lbls = Array.from(document.querySelectorAll(".box-label"));
     if (!lbls.length) return "";
@@ -149,18 +148,7 @@
     return tokens.join(",");
   }
 
-  function ensureSelectedImagesInput(form, value) {
-    let inp = form.querySelector('input[name="SelectedImages"]');
-    if (!inp) {
-      inp = document.createElement("input");
-      inp.type = "hidden";
-      inp.name = "SelectedImages";
-      form.appendChild(inp);
-    }
-    inp.value = value || "";
-  }
-
-  // ===================== helpers: delay + NoCaptchaAI =====================
+  // ===================== delay + apiKey =====================
 
   function loadDelayMs() {
     return new Promise((resolve) => {
@@ -231,13 +219,15 @@
       return { ok: false, reason: "missing Data" };
     if (!clientVal)
       return { ok: false, reason: "missing ClientData" };
+
+    // ✅ انت بدلت الشرط: نخلي غير 0 هو اللي مرفوض
     if (selTokens.length <= 0)
-      return { ok: false, reason: "not enough selected images" };
+      return { ok: false, reason: "no selected images" };
 
     return { ok: true, reason: "" };
   }
 
-  // ===================== form submit =====================
+  // ===================== POST عبر fetch =====================
 
   let __sent = false;
 
@@ -259,34 +249,86 @@
       return;
     }
 
-    // نبني SelectedImages من DOM ونحقنو في الفورم
+    const tokenVal  = getTokenValue();
+    const dataVal   = getDataValue();
+    const clientVal = getClientDataValue();
     const selectedImagesVal = buildSelectedImagesValue();
-    ensureSelectedImagesInput(form, selectedImagesVal);
+    const extras = getExtraInputs();
 
-    // log preview فقط للمراقبة
-    const payloadPreview = {
-      __RequestVerificationToken: getTokenValue(),
-      SelectedImages: selectedImagesVal,
-      Data: getDataValue(),
-      ClientData: getClientDataValue(),
-      ...getExtraInputsPreview()
-    };
-    log("[AC] FORM PAYLOAD PREVIEW (order server-side):", payloadPreview);
+    const params = new URLSearchParams();
+
+    function appendField(name, value) {
+      params.append(name, value == null ? "" : String(value));
+    }
+
+    // ⚠ نحتفظ بنفس الترتيب كما طلبت
+    appendField("__RequestVerificationToken", tokenVal);
+    appendField("SelectedImages", selectedImagesVal);
+    appendField("Data", dataVal);
+    appendField("ClientData", clientVal);
+
+    extras.forEach((f) => appendField(f.name, f.value));
+
+    log("[AC] POST payload preview:", Object.fromEntries(params.entries()));
 
     const delayMs = await loadDelayMs();
     if (delayMs > 0) {
-      log(`[AC] waiting ${delayMs} ms before form.submit() ...`);
+      log(`[AC] waiting ${delayMs} ms before POST ...`);
       await new Promise((r) => setTimeout(r, delayMs));
     }
 
     __sent = true;
-    try {
-      form.submit(); // ⬅️ هنا المتصفح يتكلف بـ POST + 302 + redirect طبيعي
-      log("[AC] form.submit() called");
-    } catch (e) {
-      __sent = false;
-      console.error(LOG, "form.submit error:", e);
-    }
+
+    const actionAttr =
+      form.getAttribute("action") || "/MAR/appointment/appointmentcaptcha";
+    const url = actionAttr.startsWith("http")
+      ? actionAttr
+      : location.origin + actionAttr;
+
+    fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: params.toString(),
+      credentials: "same-origin",
+      redirect: "manual"
+    })
+      .then((resp) => {
+        const status = resp.status;
+        const locHdr = resp.headers.get("Location") || "";
+        log("AppointmentCaptcha status:", status, "Location:", locHdr);
+
+        if (status >= 300 && status < 400 && locHdr) {
+          let finalUrl;
+          try {
+            finalUrl = new URL(locHdr, url).href;
+          } catch {
+            finalUrl = locHdr;
+          }
+
+          const lower = (finalUrl || "").toLowerCase();
+
+          // ✅ إذا رايح لـ VisaType → نتبع redirect
+          if (lower.includes("/mar/appointment/visatype")) {
+            log("[AC] redirect to VisaType:", finalUrl);
+            window.location.href = finalUrl;
+          } else {
+            // أي شيء آخر → نعيد تحميل الصفحة الحالية فقط
+            log("[AC] redirect NOT VisaType, reloading current page");
+            window.location.reload();
+          }
+          return;
+        }
+
+        // مافيهش Redirect واضح → reload
+        log("[AC] no redirect (or status not 3xx), reloading current page");
+        window.location.reload();
+      })
+      .catch((err) => {
+        __sent = false; // في حالة خطأ نسمح بمحاولة أخرى
+        console.error(LOG, "fetch AppointmentCaptcha error:", err);
+      });
   }
 
   async function doCustomSubmitIfReady() {
@@ -363,7 +405,7 @@
             }
           });
 
-          // بعد ما نختار الصور، نرسل الفورم بالطريقة العادية
+          // بعد اختيار الصور بنجاح → نرسل الطلب
           doCustomSubmitIfReady();
         } catch (e) {
           console.error(LOG, "Error in success handler:", e);
@@ -377,7 +419,6 @@
   function setup() {
     const form = getForm();
     if (form) {
-      // إلى حاول المستخدم يضغط Submit يدوي، نستغل نفس المنطق
       form.addEventListener("submit", (ev) => {
         ev.preventDefault();
         doCustomSubmitIfReady();
@@ -390,7 +431,7 @@
       console.error(LOG, "autoSolveCaptchaIfPossible error:", e)
     );
 
-    log("AppointmentCaptcha custom handler ready (form.submit navigation)");
+    log("AppointmentCaptcha custom handler ready (fetch + redirect check)");
   }
 
   if (
