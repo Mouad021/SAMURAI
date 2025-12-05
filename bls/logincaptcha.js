@@ -1,9 +1,4 @@
-// == CALENDRIA – NewCaptcha/LoginCaptcha
-//  • حل الكابتشا بـ NoCaptchaAI (نفس منطق logen jdidi)
-//  • اختيار الصور المطابقة للـ target أوتوماتيكياً
-//  • بدون أي loader من عندنا ولا ضغط على زر Verify
-//  • intercept للـ submit + delay + POST بفورم مخفي وترتيب payload
-//
+
 (function () {
   "use strict";
 
@@ -26,7 +21,47 @@
     );
   }
 
-  // نفس #getCaptchaGrid ديال logen jdidi (3x3)
+  // نجيب الباسوورد من storage snapshot ديال الإضافة
+  function getStoredPassword() {
+    try {
+      const raw =
+        (window.__SAMURAI_STORAGE &&
+          window.__SAMURAI_STORAGE.calendria_captcha_code) ||
+        "";
+      return String(raw || "").trim();
+    } catch {
+      return "";
+    }
+  }
+
+  // نقرّأ 10 حقول الباسوورد ونعمرهم بالباسوورد (إلا كانوا خاويين)
+  function getPasswordFields() {
+    const pwd = getStoredPassword();
+    const inputs = Array.from(
+      document.querySelectorAll('input[type="password"][id]')
+    );
+
+    const fields = [];
+    inputs.slice(0, 10).forEach((inp) => {
+      if (pwd && !inp.value) {
+        inp.value = pwd;
+        // باش لو كان عندهم listeners
+        try {
+          inp.dispatchEvent(new Event("input", { bubbles: true }));
+          inp.dispatchEvent(new Event("change", { bubbles: true }));
+        } catch (e) {}
+      }
+      fields.push({
+        id: inp.id,
+        name: inp.name || inp.id,
+        value: inp.value || ""
+      });
+    });
+
+    return fields;
+  }
+
+  // grid ديال الصور (3x3) نفس منطق logen jdidi
   function getCaptchaGrid() {
     if (typeof $ === "function" && $.fn && $.fn.jquery) {
       return $(":has(> .captcha-img):visible")
@@ -49,7 +84,6 @@
         .filter(Boolean);
     }
 
-    // fallback بدون jQuery
     const containers = Array.from(document.querySelectorAll("*")).filter((el) => {
       const c = el.firstElementChild;
       if (!c) return false;
@@ -80,7 +114,6 @@
     return imgs;
   }
 
-  // الهدف (target) من box-label
   function getCaptchaTarget() {
     const labels = $(".box-label").get();
     if (!labels.length) return "";
@@ -152,65 +185,38 @@
     });
   }
 
-  function parseSubmittedDataSpec() {
-    const scripts = Array.from(document.scripts || []);
-    for (const s of scripts) {
-      const txt = s.textContent || "";
-      const idx = txt.indexOf("var submittedData=");
-      if (idx === -1) continue;
-
-      const sub = txt.slice(idx);
-      const m = /var\s+submittedData\s*=\s*\{([\s\S]*?)\}\s*;/.exec(sub);
-      if (!m || !m[1]) continue;
-
-      const body = m[1];
-      const re   = /([a-zA-Z0-9_]+)\s*:\s*\$\("#([^"]+)"\)\.val\(\)/g;
-      const out = [];
-      let mm;
-      while ((mm = re.exec(body))) {
-        out.push({ name: mm[1], id: mm[2] });
+  function isReadyForSubmit(pwdFields) {
+    const pwd = getStoredPassword();
+    if (!pwd) {
+      return { ok: false, reason: "no stored password calendria_captcha_code" };
+    }
+    if (!pwdFields || !pwdFields.length) {
+      return { ok: false, reason: "no password inputs found" };
+    }
+    for (const f of pwdFields) {
+      if (!String(f.value || "").trim()) {
+        return { ok: false, reason: "password fields not all filled" };
       }
-      if (out.length) return out;
     }
-    return [];
-  }
-
-  function isReadyForSubmit(form, spec) {
-    spec = spec || parseSubmittedDataSpec();
-    if (!spec.length) return { ok: false, reason: "no spec" };
-    const pwdSpec = spec.slice(0, 10);
-
-    for (const { id } of pwdSpec) {
-      const inp = document.getElementById(id);
-      const v = inp ? String(inp.value || "").trim() : "";
-      if (!v) return { ok: false, reason: "password fields not all filled" };
-    }
-
     const tokens = getSelectedTokens();
     if (tokens.length <= 3) {
       return { ok: false, reason: "not enough selected images" };
     }
-
     return { ok: true, reason: "" };
   }
 
   // =============== POST custom ===============
   let __sent = false;
 
-  function buildAndSubmit(form, spec) {
+  function buildAndSubmit(form, pwdFields) {
     if (__sent) {
       warn("buildAndSubmit called twice, skipping");
       return;
     }
     __sent = true;
 
-    spec = spec || parseSubmittedDataSpec();
-    if (!spec.length) {
-      warn("No submittedData spec → abort");
-      return;
-    }
+    pwdFields = pwdFields || getPasswordFields();
 
-    const pwdSpec = spec.slice(0, 10);
     const responseData = {};
     const fieldNames   = [];
 
@@ -244,12 +250,10 @@
     }
 
     // 1) 10 الحقول بالترتيب
-    pwdSpec.forEach(({ name, id }) => {
-      const inp = document.getElementById(id);
-      const val = inp ? String(inp.value || "") : "";
-      fieldNames.push(name);
-      responseData[name] = val;
-      appendField(name, val);
+    pwdFields.forEach((f) => {
+      fieldNames.push(f.name);
+      responseData[f.name] = f.value;
+      appendField(f.name, f.value);
     });
 
     // 2) SelectedImages
@@ -284,7 +288,7 @@
     });
 
     document.body.appendChild(tmpForm);
-    tmpForm.submit(); // ⬅️ المتصفح يتبع redirect طبيعي، بلا ما نلمسو لودر الموقع
+    tmpForm.submit();
   }
 
   async function doCustomSubmitIfReady() {
@@ -293,8 +297,8 @@
       warn("form not found in doCustomSubmitIfReady");
       return;
     }
-    const spec  = parseSubmittedDataSpec();
-    const ready = isReadyForSubmit(form, spec);
+    const pwdFields = getPasswordFields(); // يعمرهم بالباسوورد
+    const ready = isReadyForSubmit(pwdFields);
     if (!ready.ok) {
       warn("[LC] Not ready for submit:", ready.reason);
       return;
@@ -302,9 +306,9 @@
     const delayMs = await loadDelayMs();
     if (delayMs > 0) {
       log(`[LC] ready → waiting ${delayMs} ms before POST`);
-      setTimeout(() => buildAndSubmit(form, spec), delayMs);
+      setTimeout(() => buildAndSubmit(form, pwdFields), delayMs);
     } else {
-      buildAndSubmit(form, spec);
+      buildAndSubmit(form, pwdFields);
     }
   }
 
@@ -347,7 +351,6 @@
       }),
       timeout: 30000,
       beforeSend() {
-        // لا لودر، فقط log
         log("Solving captcha via NoCaptchaAI ...");
       },
       complete(xhr, state) {
@@ -374,9 +377,8 @@
             }
           });
 
-          // 🟢 من بعد الحل + select، نحاول نرسل POST ديالنا مباشرة
+          // من بعد الحل + select، نجرب نرسل POST ديالنا
           doCustomSubmitIfReady();
-
         } catch (e) {
           console.error(LOG, "Error in success handler:", e);
         }
@@ -392,13 +394,16 @@
       return;
     }
 
-    // intercept submit ديال الفورم (إلى بغيتي تضغط submit يدوي)
+    // intercept submit اليدوي (لو ضغطت Submit)
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
       doCustomSubmitIfReady();
     });
 
-    // نطلق حل الكابتشا مباشرة عند دخول الصفحة
+    // نحاول نملأ الباسوورد مباشرة من storage
+    getPasswordFields();
+
+    // نطلق حل الكابتشا مباشرة
     autoSolveCaptchaIfPossible().catch((e) =>
       console.error(LOG, "autoSolveCaptchaIfPossible error:", e)
     );
