@@ -1,4 +1,4 @@
-// == CALENDRIA AppointmentCaptcha helper (NoCaptchaAI + fetch + redirect filter) ==
+// == CALENDRIA AppointmentCaptcha helper (NoCaptchaAI + fetch + redirect filter v2) ==
 (() => {
   "use strict";
 
@@ -11,9 +11,6 @@
   const LOG  = "[CALENDRIA][ApptCaptcha]";
   const log  = (...a) => console.log(LOG, ...a);
   const warn = (...a) => console.warn(LOG, ...a);
-
-  const VISA_URL_PREFIX =
-    "https://www.blsspainmorocco.net/mar/appointment/visatype?data="; // نستخدمها للمقارنة
 
   // ===================== helpers: form + fields =====================
 
@@ -252,11 +249,11 @@
     }
     __sent = true;
 
-    const tokenVal         = getTokenValue();
-    const dataVal          = getDataValue();
-    const clientVal        = getClientDataValue();
-    const selectedImagesVal= buildSelectedImagesValue();
-    const extras           = getExtraInputs();
+    const tokenVal          = getTokenValue();
+    const dataVal           = getDataValue();
+    const clientVal         = getClientDataValue();
+    const selectedImagesVal = buildSelectedImagesValue();
+    const extras            = getExtraInputs();
 
     const params = new URLSearchParams();
 
@@ -305,15 +302,22 @@
             finalUrl = locHdr;
           }
 
-          const lower = (finalUrl || "").toLowerCase();
+          const locLower   = (locHdr   || "").toLowerCase();
+          const finalLower = (finalUrl || "").toLowerCase();
 
-          // ✅ إذا كان EXACT نفس بداية رابط VisaType → اتبع
-          if (lower.startsWith(VISA_URL_PREFIX)) {
+          // 🔍 نعتبره VisaType إذا ANY of them فيه "/mar/appointment/visatype?"
+          const isVisaType =
+            locLower.includes("/mar/appointment/visatype?") ||
+            finalLower.includes("/mar/appointment/visatype?");
+
+          log("[AC] redirect check → isVisaType =", isVisaType,
+              "locHdr =", locHdr, "finalUrl =", finalUrl);
+
+          if (isVisaType) {
             log("[AC] redirect to VisaType, following:", finalUrl);
-            window.location.href = finalUrl;   // navigation عادي، لا fetch
+            window.location.href = finalUrl;   // navigation عادي
           } else {
-            // ❌ أي redirect آخر → reload فقط
-            log("[AC] redirect not VisaType, reloading current page");
+            log("[AC] redirect NOT VisaType, reloading current page");
             window.location.reload();
           }
           return;
@@ -421,7 +425,6 @@
       return;
     }
 
-    // نمنع submit العادي → نستعمل منطقنا
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
       doCustomSubmitIfReady();
@@ -431,7 +434,7 @@
       console.error(LOG, "autoSolveCaptchaIfPossible error:", e)
     );
 
-    log("AppointmentCaptcha custom handler ready (fetch + redirect filter)");
+    log("AppointmentCaptcha custom handler ready (fetch + redirect filter v2)");
   }
 
   if (document.readyState === "complete" || document.readyState === "interactive") {
