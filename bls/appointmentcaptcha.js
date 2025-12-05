@@ -1,4 +1,4 @@
-// == CALENDRIA AppointmentCaptcha helper (NoCaptchaAI + fetch + redirect filter v2) ==
+// == CALENDRIA AppointmentCaptcha helper (NoCaptchaAI + native form submit) ==
 (() => {
   "use strict";
 
@@ -6,6 +6,7 @@
   window.__calendria_apptcaptcha_started = true;
 
   const href = (location.href || "").toLowerCase();
+  // نشتغل فقط في صفحة NewAppointment
   if (!href.includes("/mar/appointment/newappointment")) return;
 
   const LOG  = "[CALENDRIA][ApptCaptcha]";
@@ -36,22 +37,16 @@
     return el && el.value ? String(el.value) : "";
   }
 
-  function getExtraInputs() {
-    const extras = [];
-    const ignore = new Set([
-      "__RequestVerificationToken",
-      "SelectedImages",
-      "Data",
-      "ClientData"
-    ]);
-    document
-      .querySelectorAll('input[type="hidden"][name]')
-      .forEach((inp) => {
-        const name = inp.name;
-        if (!name || ignore.has(name)) return;
-        extras.push({ name, value: inp.value || "" });
-      });
-    return extras;
+  // نضمن وجود حقل SelectedImages و نملأه بالقيمة اللي بنينا من الصور المختارة
+  function ensureSelectedImagesInput(form, value) {
+    let inp = form.querySelector('input[name="SelectedImages"]');
+    if (!inp) {
+      inp = document.createElement("input");
+      inp.type = "hidden";
+      inp.name = "SelectedImages";
+      form.appendChild(inp);
+    }
+    inp.value = value || "";
   }
 
   // ===================== captcha grid & target =====================
@@ -183,16 +178,11 @@
     return new Promise((resolve) => {
       try {
         if (!chrome || !chrome.storage || !chrome.storage.local) {
-          try {
-            const raw =
-              window.__SAMURAI_STORAGE &&
-              window.__SAMURAI_STORAGE.calendria_nocaptcha_apikey;
-            resolve(String(raw || "").trim());
-            return;
-          } catch {
-            resolve("");
-            return;
-          }
+          const raw =
+            window.__SAMURAI_STORAGE &&
+            window.__SAMURAI_STORAGE.calendria_nocaptcha_apikey;
+          resolve(String(raw || "").trim());
+          return;
         }
       } catch {
         resolve("");
@@ -226,11 +216,11 @@
     return { ok: true, reason: "" };
   }
 
-  // ===================== POST via fetch =====================
+  // ===================== native submit =====================
 
   let __sent = false;
 
-  async function buildAndSubmit() {
+  async function autoSubmitIfReady() {
     const form = getForm();
     if (!form) {
       warn("form not found");
@@ -244,102 +234,30 @@
     }
 
     if (__sent) {
-      warn("buildAndSubmit called twice, skipping");
+      warn("autoSubmitIfReady called twice, skipping");
       return;
     }
     __sent = true;
 
-    const tokenVal          = getTokenValue();
-    const dataVal           = getDataValue();
-    const clientVal         = getClientDataValue();
     const selectedImagesVal = buildSelectedImagesValue();
-    const extras            = getExtraInputs();
+    ensureSelectedImagesInput(form, selectedImagesVal);
 
-    const params = new URLSearchParams();
-
-    function appendField(name, value) {
-      params.append(name, value == null ? "" : String(value));
-    }
-
-    // الترتيب كما طلبت
-    appendField("__RequestVerificationToken", tokenVal);
-    appendField("SelectedImages", selectedImagesVal);
-    appendField("Data", dataVal);
-    appendField("ClientData", clientVal);
-    extras.forEach((f) => appendField(f.name, f.value));
-
-    log("[AC] POST payload preview:", Object.fromEntries(params.entries()));
+    log("[AC] native submit with SelectedImages =", selectedImagesVal);
 
     const delayMs = await loadDelayMs();
     if (delayMs > 0) {
-      log(`[AC] waiting ${delayMs} ms before POST ...`);
+      log(`[AC] waiting ${delayMs} ms before native form.submit() ...`);
       await new Promise((r) => setTimeout(r, delayMs));
     }
 
-    const actionAttr =
-      form.getAttribute("action") || "/MAR/Appointment/appointmentcaptcha";
-    const url = actionAttr.startsWith("http")
-      ? actionAttr
-      : location.origin + actionAttr;
-
-    fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: params.toString(),
-      credentials: "same-origin",
-      redirect: "manual"
-    })
-      .then((resp) => {
-        const status = resp.status;
-        const locHdr = resp.headers.get("Location") || "";
-        log("AppointmentCaptcha status:", status, "Location:", locHdr);
-
-        if (status >= 300 && status < 400 && locHdr) {
-          let finalUrl;
-          try {
-            finalUrl = new URL(locHdr, url).href;
-          } catch {
-            finalUrl = locHdr;
-          }
-
-          const locLower   = (locHdr   || "").toLowerCase();
-          const finalLower = (finalUrl || "").toLowerCase();
-
-          // 🔍 نعتبره VisaType إذا ANY of them فيه "/mar/appointment/visatype?"
-          const isVisaType =
-            locLower.includes("/mar/appointment/visatype?") ||
-            finalLower.includes("/mar/appointment/visatype?");
-
-          log("[AC] redirect check → isVisaType =", isVisaType,
-              "locHdr =", locHdr, "finalUrl =", finalUrl);
-
-          if (isVisaType) {
-            log("[AC] redirect to VisaType, following:", finalUrl);
-            window.location.href = finalUrl;   // navigation عادي
-          } else {
-            log("[AC] redirect NOT VisaType, reloading current page");
-            window.location.reload();
-          }
-          return;
-        }
-
-        // ماشي 3xx → reload
-        log("[AC] no redirect (or status not 3xx), reloading current page");
-        window.location.reload();
-      })
-      .catch((err) => {
-        __sent = false;
-        console.error(LOG, "fetch AppointmentCaptcha error:", err);
-      });
-  }
-
-  async function doCustomSubmitIfReady() {
-    const ready = isReadyForSubmit();
-    if (!ready.ok) {
-      warn("[AC] Not ready for submit:", ready.reason);
-      return;
+    try {
+      // native submit باش ما نصطادش event listeners أخرى
+      HTMLFormElement.prototype.submit.call(form);
+      log("[AC] native form.submit() called");
+    } catch (e) {
+      __sent = false;
+      console.error(LOG, "native form.submit error:", e);
     }
-    await buildAndSubmit();
   }
 
   // ===================== NoCaptchaAI solving =====================
@@ -407,8 +325,8 @@
             }
           });
 
-          // بعد اختيار الصور → نرسل الطلب ديالنا
-          doCustomSubmitIfReady();
+          // بعد اختيار الصور → submit عادي
+          autoSubmitIfReady();
         } catch (e) {
           console.error(LOG, "Error in success handler:", e);
         }
@@ -425,21 +343,27 @@
       return;
     }
 
+    // نحترم حتى لو استعملت زر Submit يدوي
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
-      doCustomSubmitIfReady();
+      autoSubmitIfReady();
     });
 
     autoSolveCaptchaIfPossible().catch((e) =>
       console.error(LOG, "autoSolveCaptchaIfPossible error:", e)
     );
 
-    log("AppointmentCaptcha custom handler ready (fetch + redirect filter v2)");
+    log("AppointmentCaptcha handler ready (NoCaptchaAI + native submit)");
   }
 
-  if (document.readyState === "complete" || document.readyState === "interactive") {
+  if (
+    document.readyState === "complete" ||
+    document.readyState === "interactive"
+  ) {
     setTimeout(setup, 200);
   } else {
-    document.addEventListener("DOMContentLoaded", () => setTimeout(setup, 200));
+    document.addEventListener("DOMContentLoaded", () =>
+      setTimeout(setup, 200)
+    );
   }
 })();
