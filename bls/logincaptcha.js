@@ -272,7 +272,7 @@
     }
 
     const tokens = getSelectedTokens();
-    if (tokens.length <= 3) {
+    if (tokens.length <= 0) {
       return { ok: false, reason: "not enough selected images" };
     }
     return { ok: true, reason: "" };
