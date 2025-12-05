@@ -151,7 +151,11 @@
   // ---------- 4) find visible dropdown inputs ----------
   function findVisibleFieldInputs(form) {
     const elements = form.querySelectorAll(".mb-3");
-    let categoryId = null, locationId = null, visaTypeId = null, visaSubTypeId = null;
+    let categoryId = null,
+        locationId = null,
+        visaTypeId = null,
+        visaSubTypeId = null,
+        appointmentForId = null;   // 🆕 هنا غادي نخزنو الانبوت الأصلي ديال Appointment For
 
     elements.forEach(node => {
       const cs = getComputedStyle(node);
@@ -164,13 +168,21 @@
       const labelId   = label.getAttribute("for");
       if (!labelId) return;
 
-      if (labelText.includes("Category"))           categoryId    = labelId;
-      else if (labelText.includes("Location"))      locationId    = labelId;
-      else if (labelText.includes("Visa Type"))     visaTypeId    = labelId;
-      else if (labelText.includes("Visa Sub Type")) visaSubTypeId = labelId;
+      if (labelText.includes("Category")) {
+        categoryId = labelId;
+      } else if (labelText.includes("Location")) {
+        locationId = labelId;
+      } else if (labelText.includes("Visa Type")) {
+        visaTypeId = labelId;
+      } else if (labelText.includes("Visa Sub Type")) {
+        visaSubTypeId = labelId;
+      } else if (labelText.toLowerCase().includes("appointment for")) {
+        // ✅ نفس الطريقة ديال لوكيشن/كاتيغوري ولكن لـ "Appointment For"
+        appointmentForId = labelId;
+      }
     });
 
-    const out = { locationId, visaTypeId, visaSubTypeId, categoryId };
+    const out = { locationId, visaTypeId, visaSubTypeId, categoryId, appointmentForId };
     log("visible field inputs:", out);
     return out;
   }
@@ -333,35 +345,35 @@
       }
       chrome.storage.local.get(["calendria_appointment_for"], (res = {}) => {
         const raw = (res.calendria_appointment_for || "").toString().trim().toLowerCase();
-        if (raw === "family")      resolve("Family");
-        else if (raw === "individual") resolve("Individual");
-        else resolve(readAppointmentForFromDom(form));
+        if (raw === "family")           resolve("Family");
+        else if (raw === "individual")  resolve("Individual");
+        else                            resolve(readAppointmentForFromDom(form));
       });
     });
   }
 
-  // 🆕 نحدد الانبت الأصلي لـ Appointment For بنفس طريقة location...
+  // 🆕 نحدّد الانبت الأصلي ديال Appointment For بنفس منطق .mb-3 + label
   function findAppointmentForInputId(form) {
-    const map = parseSubmittedDataSpec();
-    for (const { id } of map) {
-      const el = document.getElementById(id);
-      if (!el) continue;
-      const block = el.closest(".mb-3");
-      if (!block) continue;
-      const label = block.querySelector("label");
+    const blocks = form.querySelectorAll(".mb-3");
+    for (const node of blocks) {
+      const cs = getComputedStyle(node);
+      if (cs.display === "none") continue;
+      const label = node.querySelector("label");
       if (!label) continue;
       const txt = (label.textContent || "").toLowerCase();
+      const labelId = label.getAttribute("for");
+      if (!labelId) continue;
       if (txt.includes("appointment for")) {
-        log("[VT] AppointmentFor base input id:", id);
-        return id;
+        log("[VT] AppointmentFor base input id (via .mb-3):", labelId);
+        return labelId;
       }
     }
-    warn("[VT] AppointmentFor base input id not found via map");
+    warn("[VT] AppointmentFor base input id not found via .mb-3");
     return null;
   }
 
   // نضبط الراديو في الواجهة + الانبت الأصلي
-  function syncAppointmentFor(form, apptForVal) {
+  function syncAppointmentFor(form, apptForVal, baseIdFromFields) {
     if (!apptForVal) return;
 
     // 1) الراديو اللي عندو value مناسبة
@@ -377,7 +389,7 @@
     }
 
     // 2) الانبت الأصلي (hidden/text) داخل بلوك "Appointment For"
-    const baseId = findAppointmentForInputId(form);
+    const baseId = baseIdFromFields || findAppointmentForInputId(form);
     if (baseId) {
       const baseEl = document.getElementById(baseId);
       if (baseEl) {
@@ -512,7 +524,9 @@
     if (fields.categoryId)    forceValueIntoField(fields.categoryId,    ids.categoryId);
 
     const apptForVal = await getAppointmentForValue(form);
-    syncAppointmentFor(form, apptForVal);
+
+    // ✅ الآن نستعمل نفس system ديال الحقول باش نحط "Family" أو "Individual"
+    syncAppointmentFor(form, apptForVal, fields.appointmentForId);
 
     // نعطي شوية وقت بسيط باش أي logic داخلي يكمل، ثم نحقن members
     await new Promise(r => setTimeout(r, 150));
