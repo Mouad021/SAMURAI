@@ -1,4 +1,4 @@
-// == CALENDRIA AppointmentCaptcha helper (NoCaptchaAI + custom POST) ==
+// == CALENDRIA AppointmentCaptcha helper (NoCaptchaAI + form.submit) ==
 (() => {
   "use strict";
 
@@ -36,9 +36,9 @@
     return el && el.value ? String(el.value) : "";
   }
 
-  // نجمع باقي ال hidden inputs (إذا كانو) باش نضيفهم للبوست
-  function getExtraInputs() {
-    const extras = [];
+  // نجمع باقي ال hidden inputs (فقط باش نعاينهم فالـ log)
+  function getExtraInputsPreview() {
+    const extras = {};
     const ignore = new Set([
       "__RequestVerificationToken",
       "SelectedImages",
@@ -50,7 +50,7 @@
       .forEach((inp) => {
         const name = inp.name;
         if (!name || ignore.has(name)) return;
-        extras.push({ name, value: inp.value || "" });
+        extras[name] = inp.value || "";
       });
     return extras;
   }
@@ -58,7 +58,7 @@
   // ===================== helpers: captcha grid & target =====================
 
   function getCaptchaGrid() {
-    // نفس منطق logincaptcha: نستعمل jQuery إلا كان، وإلا DOM عادي
+    // نفس منطق logincaptcha: jQuery إذا كان، وإلا DOM عادي
     try {
       if (typeof $ === "function" && $.fn && $.fn.jquery) {
         return $(":has(> .captcha-img):visible")
@@ -149,6 +149,17 @@
     return tokens.join(",");
   }
 
+  function ensureSelectedImagesInput(form, value) {
+    let inp = form.querySelector('input[name="SelectedImages"]');
+    if (!inp) {
+      inp = document.createElement("input");
+      inp.type = "hidden";
+      inp.name = "SelectedImages";
+      form.appendChild(inp);
+    }
+    inp.value = value || "";
+  }
+
   // ===================== helpers: delay + NoCaptchaAI =====================
 
   function loadDelayMs() {
@@ -209,21 +220,24 @@
   // ===================== ready check =====================
 
   function isReadyForSubmit() {
-    const tokenVal = getTokenValue();
-    const dataVal  = getDataValue();
-    const clientVal = getClientDataValue();
-    const selTokens = getSelectedTokens();
+    const tokenVal   = getTokenValue();
+    const dataVal    = getDataValue();
+    const clientVal  = getClientDataValue();
+    const selTokens  = getSelectedTokens();
 
-    if (!tokenVal)   return { ok: false, reason: "missing __RequestVerificationToken" };
-    if (!dataVal)    return { ok: false, reason: "missing Data" };
-    if (!clientVal)  return { ok: false, reason: "missing ClientData" };
-    if (selTokens.length <= 3) {
+    if (!tokenVal)
+      return { ok: false, reason: "missing __RequestVerificationToken" };
+    if (!dataVal)
+      return { ok: false, reason: "missing Data" };
+    if (!clientVal)
+      return { ok: false, reason: "missing ClientData" };
+    if (selTokens.length <= 3)
       return { ok: false, reason: "not enough selected images" };
-    }
+
     return { ok: true, reason: "" };
   }
 
-  // ===================== POST builder =====================
+  // ===================== form submit =====================
 
   let __sent = false;
 
@@ -233,78 +247,48 @@
       return;
     }
 
+    const form = getForm();
+    if (!form) {
+      warn("form not found");
+      return;
+    }
+
     const ready = isReadyForSubmit();
     if (!ready.ok) {
       warn("[AC] Not ready for submit:", ready.reason);
       return;
     }
 
-    __sent = true;
-
-    const tokenVal  = getTokenValue();
-    const dataVal   = getDataValue();
-    const clientVal = getClientDataValue();
+    // نبني SelectedImages من DOM ونحقنو في الفورم
     const selectedImagesVal = buildSelectedImagesValue();
-    const extras = getExtraInputs();
+    ensureSelectedImagesInput(form, selectedImagesVal);
 
-    const params = new URLSearchParams();
-
-    function appendField(name, value) {
-      params.append(name, value == null ? "" : String(value));
-    }
-
-    // نحافظ على نفس الترتيب المطلوب
-    appendField("__RequestVerificationToken", tokenVal);
-    appendField("SelectedImages", selectedImagesVal);
-    appendField("Data", dataVal);
-    appendField("ClientData", clientVal);
-
-    // باقي الحقول (إن وُجدت) نضيفهم في الأخير
-    extras.forEach((f) => appendField(f.name, f.value));
-
-    log("[AC] POST payload preview:", Object.fromEntries(params.entries()));
+    // log preview فقط للمراقبة
+    const payloadPreview = {
+      __RequestVerificationToken: getTokenValue(),
+      SelectedImages: selectedImagesVal,
+      Data: getDataValue(),
+      ClientData: getClientDataValue(),
+      ...getExtraInputsPreview()
+    };
+    log("[AC] FORM PAYLOAD PREVIEW (order server-side):", payloadPreview);
 
     const delayMs = await loadDelayMs();
     if (delayMs > 0) {
-      log(`[AC] waiting ${delayMs} ms before POST ...`);
+      log(`[AC] waiting ${delayMs} ms before form.submit() ...`);
       await new Promise((r) => setTimeout(r, delayMs));
     }
 
-    const url = "/MAR/appointment/appointmentcaptcha";
-
-    fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: params.toString(),
-      credentials: "same-origin",
-      redirect: "manual"
-    })
-      .then((resp) => {
-        const status = resp.status;
-        const locHdr = resp.headers.get("Location") || "";
-        log("AppointmentCaptcha status:", status, "Location:", locHdr);
-
-        // إذا كان عندنا Redirect → نمشيو له
-        if (status >= 300 && status < 400 && locHdr) {
-          const finalUrl = new URL(locHdr, url).href;
-          log("Redirecting to:", finalUrl);
-          window.location.href = finalUrl;
-          return;
-        }
-
-        // ما كانش Location → نعمل reload للصفحة
-        log("No redirect location, reloading current page");
-        window.location.reload();
-      })
-      .catch((err) => {
-        __sent = false; // نفكّ البلوك فحالة الخطأ باش يمكن نحاولو مرة أخرى
-        console.error(LOG, "fetch AppointmentCaptcha error:", err);
-      });
+    __sent = true;
+    try {
+      form.submit(); // ⬅️ هنا المتصفح يتكلف بـ POST + 302 + redirect طبيعي
+      log("[AC] form.submit() called");
+    } catch (e) {
+      __sent = false;
+      console.error(LOG, "form.submit error:", e);
+    }
   }
 
-  // wrapper يستعمل ready check + delay
   async function doCustomSubmitIfReady() {
     const ready = isReadyForSubmit();
     if (!ready.ok) {
@@ -379,7 +363,7 @@
             }
           });
 
-          // بعد ما نختار الصور، نرسل POST ديالنا
+          // بعد ما نختار الصور، نرسل الفورم بالطريقة العادية
           doCustomSubmitIfReady();
         } catch (e) {
           console.error(LOG, "Error in success handler:", e);
@@ -393,19 +377,20 @@
   function setup() {
     const form = getForm();
     if (form) {
+      // إلى حاول المستخدم يضغط Submit يدوي، نستغل نفس المنطق
       form.addEventListener("submit", (ev) => {
         ev.preventDefault();
         doCustomSubmitIfReady();
       });
     } else {
-      warn("AppointmentCaptcha form NOT found (سنستعمل fetch فقط)");
+      warn("AppointmentCaptcha form NOT found");
     }
 
     autoSolveCaptchaIfPossible().catch((e) =>
       console.error(LOG, "autoSolveCaptchaIfPossible error:", e)
     );
 
-    log("AppointmentCaptcha custom handler ready");
+    log("AppointmentCaptcha custom handler ready (form.submit navigation)");
   }
 
   if (
