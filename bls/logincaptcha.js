@@ -1,6 +1,7 @@
 // == CALENDRIA – NewCaptcha/LoginCaptcha
 //  • حل الكابتشا بـ NoCaptchaAI (نفس منطق logen jdidi)
 //  • اختيار الصور المطابقة للـ target أوتوماتيكياً
+//  • بدون أي loader من عندنا ولا ضغط على زر Verify
 //  • intercept للـ submit + delay + POST بفورم مخفي وترتيب payload
 //
 (function () {
@@ -25,7 +26,7 @@
     );
   }
 
-  // نفس #getCaptchaGrid القديم
+  // نفس #getCaptchaGrid ديال logen jdidi (3x3)
   function getCaptchaGrid() {
     if (typeof $ === "function" && $.fn && $.fn.jquery) {
       return $(":has(> .captcha-img):visible")
@@ -48,7 +49,7 @@
         .filter(Boolean);
     }
 
-    // fallback بدون jQuery (تقريباً نفس الفكرة)
+    // fallback بدون jQuery
     const containers = Array.from(document.querySelectorAll("*")).filter((el) => {
       const c = el.firstElementChild;
       if (!c) return false;
@@ -79,15 +80,13 @@
     return imgs;
   }
 
-  // نفس #getCaptchaTarget القديم
+  // الهدف (target) من box-label
   function getCaptchaTarget() {
     const labels = $(".box-label").get();
     if (!labels.length) return "";
     const top = labels
       .sort((a, b) => getComputedStyle(b).zIndex - getComputedStyle(a).zIndex)[0];
-    return (top.textContent || "")
-      .replace(/\D+/, "") // ناخدو الجزء الرقمي
-      .trim();
+    return (top.textContent || "").replace(/\D+/g, "").trim();
   }
 
   function getSelectedTokens() {
@@ -275,8 +274,38 @@
     if (tokenVal) appendField("__RequestVerificationToken", tokenVal);
 
     log("Custom form action:", actionUrl);
+    log("Custom payload:", {
+      pwdFields: fieldNames,
+      SelectedImages: selectedImagesVal,
+      Id: idVal,
+      ReturnUrl: returnUrlVal,
+      Param: paramVal,
+      CaptchaText: captchaText
+    });
+
     document.body.appendChild(tmpForm);
-    tmpForm.submit();
+    tmpForm.submit(); // ⬅️ المتصفح يتبع redirect طبيعي، بلا ما نلمسو لودر الموقع
+  }
+
+  async function doCustomSubmitIfReady() {
+    const form = getForm();
+    if (!form) {
+      warn("form not found in doCustomSubmitIfReady");
+      return;
+    }
+    const spec  = parseSubmittedDataSpec();
+    const ready = isReadyForSubmit(form, spec);
+    if (!ready.ok) {
+      warn("[LC] Not ready for submit:", ready.reason);
+      return;
+    }
+    const delayMs = await loadDelayMs();
+    if (delayMs > 0) {
+      log(`[LC] ready → waiting ${delayMs} ms before POST`);
+      setTimeout(() => buildAndSubmit(form, spec), delayMs);
+    } else {
+      buildAndSubmit(form, spec);
+    }
   }
 
   // =============== حل الكابتشا بـ NoCaptchaAI ===============
@@ -306,36 +335,6 @@
 
     log("Calling NoCaptchaAI, target =", target, "grid length =", grid.length);
 
-    const onError = (type, data) => {
-      console.error(LOG, "NoCaptchaAI error:", type, data);
-      $(".validation-summary-valid").html("<b>Failed to solve captcha.</b>");
-    };
-
-    const onSuccess = (result) => {
-      if (result.status === "solved") {
-        try {
-          Object.entries(result.solution || {}).forEach(([index, value]) => {
-            if (String(value) === String(target)) {
-              const idx = Number(index);
-              if (!Number.isNaN(idx) && grid[idx]) {
-                grid[idx].click(); // ✅ نفس منطق logen jdidi
-              }
-            }
-          });
-
-          // بعد اختيار الصور، نضغط Verify باش يدوز submit → intercept
-          const btn = $("#btnVerify");
-          if (btn.length) {
-            setTimeout(() => btn.trigger("click"), 50);
-          }
-        } catch (e) {
-          onError("handler", e);
-        }
-      } else {
-        onError("captchaerror", result);
-      }
-    };
-
     $.post({
       url: "https://pro.nocaptchaai.com/solve",
       headers: { apiKey },
@@ -348,19 +347,38 @@
       }),
       timeout: 30000,
       beforeSend() {
+        // لا لودر، فقط log
         log("Solving captcha via NoCaptchaAI ...");
       },
       complete(xhr, state) {
         log("NoCaptchaAI complete:", state);
-        switch (state) {
-          case "success":
-            onSuccess(xhr.responseJSON);
-            break;
-          case "error":
-          case "parsererror":
-          default:
-            onError(state, xhr);
-            break;
+        if (state !== "success") {
+          console.warn(LOG, "NoCaptchaAI error:", state, xhr);
+          return;
+        }
+
+        const result = xhr.responseJSON || {};
+        if (result.status !== "solved") {
+          console.warn(LOG, "NoCaptchaAI status !solved:", result);
+          return;
+        }
+
+        try {
+          // نختار الصور المطابقة للهدف
+          Object.entries(result.solution || {}).forEach(([index, value]) => {
+            if (String(value) === String(target)) {
+              const idx = Number(index);
+              if (!Number.isNaN(idx) && grid[idx]) {
+                grid[idx].click();
+              }
+            }
+          });
+
+          // 🟢 من بعد الحل + select، نحاول نرسل POST ديالنا مباشرة
+          doCustomSubmitIfReady();
+
+        } catch (e) {
+          console.error(LOG, "Error in success handler:", e);
         }
       },
     });
@@ -374,23 +392,10 @@
       return;
     }
 
-    form.addEventListener("submit", async (ev) => {
+    // intercept submit ديال الفورم (إلى بغيتي تضغط submit يدوي)
+    form.addEventListener("submit", (ev) => {
       ev.preventDefault();
-
-      const spec  = parseSubmittedDataSpec();
-      const ready = isReadyForSubmit(form, spec);
-      if (!ready.ok) {
-        warn("[LC] Not ready for submit:", ready.reason);
-        return;
-      }
-
-      const delayMs = await loadDelayMs();
-      if (delayMs > 0) {
-        log(`[LC] ready → waiting ${delayMs} ms before POST`);
-        setTimeout(() => buildAndSubmit(form, spec), delayMs);
-      } else {
-        buildAndSubmit(form, spec);
-      }
+      doCustomSubmitIfReady();
     });
 
     // نطلق حل الكابتشا مباشرة عند دخول الصفحة
