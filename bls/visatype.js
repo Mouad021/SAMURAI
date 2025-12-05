@@ -373,28 +373,34 @@
   }
 
   // نضبط الراديو في الواجهة + الانبت الأصلي
-  function syncAppointmentFor(form, apptForVal, baseIdFromFields) {
-    if (!apptForVal) return;
-
-    // 1) الراديو اللي عندو value مناسبة
-    const radio = form.querySelector('input[type="radio"][value="' + apptForVal + '"]');
-    if (radio) {
-      const name = radio.name;
-      if (name) {
-        const group = form.querySelectorAll('input[type="radio"][name="' + name + '"]');
-        group.forEach(r => { r.checked = (r === radio); });
-      } else {
-        radio.checked = true;
+  // نضبط الراديو في الواجهة + أي hidden input اسمه AppointmentFor
+    function syncAppointmentFor(form, apptForVal) {
+      if (!apptForVal) return;
+    
+      const famRadio = form.querySelector('input[type="radio"][value="Family"]');
+      const indRadio = form.querySelector('input[type="radio"][value="Individual"]');
+    
+      let radioToClick = null;
+    
+      if (apptForVal === "Family" && famRadio) {
+        radioToClick = famRadio;
+      } else if (apptForVal === "Individual" && indRadio) {
+        radioToClick = indRadio;
       }
-    }
-
-    // 2) الانبت الأصلي (hidden/text) داخل بلوك "Appointment For"
-    const baseId = baseIdFromFields || findAppointmentForInputId(form);
-    if (baseId) {
-      const baseEl = document.getElementById(baseId);
-      if (baseEl) {
-        baseEl.value = apptForVal;
-        log("[VT] set AppointmentFor base #" + baseId + " =", apptForVal);
+    
+      if (radioToClick) {
+        // ❗ نستعمل click باش يتنفذ OnAppointmentForChange(event,'igslst')
+        radioToClick.click();
+        log("[VT] AppointmentFor radio clicked:", apptForVal);
+      } else {
+        log("[VT] AppointmentFor value wanted =", apptForVal, "but radio not found");
+      }
+    
+      // لو كاين hidden input اسمه AppointmentFor نخليه متزامن كذلك
+      const hidden = form.querySelector('input[name="AppointmentFor"]');
+      if (hidden) {
+        hidden.value = apptForVal;
+        log("[VT] hidden AppointmentFor set =", apptForVal);
       }
     }
   }
@@ -542,3 +548,4 @@
     document.addEventListener("DOMContentLoaded", () => setTimeout(main, 300));
   }
 })();
+
