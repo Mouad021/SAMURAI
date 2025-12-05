@@ -1,4 +1,13 @@
-
+// == CALENDRIA – NewCaptcha/LoginCaptcha
+//  • يقرأ الباسوورد من calendria_captcha_code (storage)
+//  • يملأ فقط الانبوت الأصلي المرئي بالباسوورد
+//  • يعتمد على سكريبت الموقع لنسخ الباسوورد لباقي الخانات إذا وُجد
+//  • يحل الكابتشا عبر NoCaptchaAI ويختار الصور الصحيحة
+//  • يرسل POST LoginCaptchaSubmit عن طريق fetch
+//  • بعدها يجرب فتح /MAR/appointment/newappointment:
+//      - إذا كان redirect إلى /Account/Login → يعيد تحميل الصفحة فقط
+//      - إذا كان صفحة أخرى → يتبعها عادي
+//
 (function () {
   "use strict";
 
@@ -40,7 +49,6 @@
 
   // نحدد فقط الانبوت الأصلي ديال الباسوورد (اللي كيبان ف الصفحة)
   function getPrimaryPasswordInput() {
-    // نحاول نلقاه عن طريق الـ label[for] (حتى لو النص مشفّر)
     const labels = Array.from(document.querySelectorAll("label[for]"));
     let inp = null;
 
@@ -62,7 +70,6 @@
 
     if (inp) return inp;
 
-    // fallback: أول input[type=password] ظاهر للمستخدم
     const all = Array.from(
       document.querySelectorAll('input[type="password"]')
     );
@@ -274,10 +281,55 @@
     }
 
     const tokens = getSelectedTokens();
-    if (tokens.length <= 2) {
+    if (tokens.length <= 3) {
       return { ok: false, reason: "not enough selected images" };
     }
     return { ok: true, reason: "" };
+  }
+
+  // helper: فحص newappointment قبل التنقل
+  function smartGotoNewAppointment() {
+    const targetUrl =
+      "https://www.blsspainmorocco.net/MAR/appointment/newappointment";
+
+    fetch(targetUrl, {
+      method: "GET",
+      credentials: "same-origin",
+      redirect: "manual"
+    })
+      .then((resp) => {
+        const status = resp.status;
+        const locHdr = resp.headers.get("Location") || "";
+        log("Pre-check newappointment:", status, locHdr);
+
+        // إذا كان redirect إلى /Account/Login → فقط reload للصفحة الحالية
+        if (
+          status >= 300 &&
+          status < 400 &&
+          /\/account\/login/i.test(locHdr)
+        ) {
+          log("newappointment → Login redirect detected, reloading current page");
+          window.location.reload();
+          return;
+        }
+
+        // إذا كان redirect لشي صفحة أخرى → نتبعها
+        if (status >= 300 && status < 400 && locHdr) {
+          const finalUrl = new URL(locHdr, targetUrl).href;
+          log("newappointment redirect to:", finalUrl);
+          window.location.href = finalUrl;
+          return;
+        }
+
+        // 200 أو أي حالة أخرى → نمشي مباشرة ل newappointment
+        log("newappointment OK, navigating to:", targetUrl);
+        window.location.href = targetUrl;
+      })
+      .catch((err) => {
+        console.error(LOG, "Pre-check newappointment error:", err);
+        // فحالة الخطأ نمشيو مباشرة
+        window.location.href = targetUrl;
+      });
   }
 
   // =============== POST custom عبر fetch ===============
@@ -364,11 +416,8 @@
     })
       .then((resp) => {
         log("LoginCaptchaSubmit fetch status:", resp.status);
-        // مباشرة نمشيو لصفحة NewAppointment
-        const targetUrl =
-          "https://www.blsspainmorocco.net/MAR/appointment/newappointment";
-        log("Redirecting manually to:", targetUrl);
-        window.location.href = targetUrl;
+        // مباشرة: نفحص newappointment بالطريقة الذكية
+        smartGotoNewAppointment();
       })
       .catch((err) => {
         __sent = false; // في حالة الخطأ نسمحو بمحاولة ثانية
@@ -382,7 +431,7 @@
       warn("form not found in doCustomSubmitIfReady");
       return;
     }
-    const pwdFields = getPasswordFields(); // الموقع هو اللي عامرهم بناءً على الانبوت الأصلي
+    const pwdFields = getPasswordFields();
     const ready = isReadyForSubmit(pwdFields);
     if (!ready.ok) {
       warn("[LC] Not ready for submit:", ready.reason);
@@ -452,7 +501,6 @@
         }
 
         try {
-          // نختار الصور المطابقة للهدف
           Object.entries(result.solution || {}).forEach(([index, value]) => {
             if (String(value) === String(target)) {
               const idx = Number(index);
@@ -462,7 +510,6 @@
             }
           });
 
-          // من بعد الحل + select، نجرب نرسل POST ديالنا
           doCustomSubmitIfReady();
         } catch (e) {
           console.error(LOG, "Error in success handler:", e);
@@ -479,16 +526,13 @@
       return;
     }
 
-    // intercept submit اليدوي (لو ضغطت Submit)
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
       doCustomSubmitIfReady();
     });
 
-    // نعمر فقط الانبوت الأصلي من storage
     prefillPrimaryPasswordFromStorage();
 
-    // نطلق حل الكابتشا مباشرة
     autoSolveCaptchaIfPossible().catch((e) =>
       console.error(LOG, "autoSolveCaptchaIfPossible error:", e)
     );
