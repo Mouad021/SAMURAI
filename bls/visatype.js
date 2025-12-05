@@ -526,61 +526,34 @@
   } else {
     document.addEventListener("DOMContentLoaded", () => setTimeout(main, 300));
   }
-  //----------------------------------------------------------
-// AUTO CLICK SPECIFIC "ACCEPT" BUTTONS (VisaType ONLY)
-//----------------------------------------------------------
-function autoClickSpecificAcceptButtons() {
-  const path = location.pathname.toLowerCase();
-  if (!path.includes("/mar/appointment/visatype")) return;
 
-  let clickedOnce = false;
-
-  function isTargetButton(el) {
-    if (!(el instanceof HTMLElement)) return false;
-    if (el.tagName.toLowerCase() !== "button") return false;
-
-    const txt = (el.innerText || "").trim().toLowerCase();
-    const cls = el.className || "";
-
-    if (!cls.includes("btn-success")) return false;  
-    if (!txt.includes("accept")) return false;       
-
-    // النوع الأول: data-bs-dismiss="modal"
-    if (el.getAttribute("data-bs-dismiss") === "modal") return true;
-
-    // النوع الثاني: onclick="return OnFamilyAccept();"
-    const onclickAttr = el.getAttribute("onclick") || "";
-    if (onclickAttr.includes("OnFamilyAccept")) return true;
-
-    return false;
-  }
   //----------------------------------------------------------
   // AUTO ACCEPT: Premium first → then Family  (VisaType ONLY)
   //----------------------------------------------------------
   function autoAcceptPremiumThenFamily() {
     const path = location.pathname.toLowerCase();
     if (!path.includes("/mar/appointment/visatype")) return;
-  
+
     // ننتظر نصف ثانية قبل البدء
     setTimeout(() => {
       tryClickPremium();
     }, 500);
-  
+
     function findBlockContaining(text) {
       const allBlocks = Array.from(document.querySelectorAll("div, h5, span, section"));
       return allBlocks.find(el => (el.innerText || "").trim().toLowerCase().includes(text.toLowerCase()));
     }
-  
+
     function findAcceptBtnInside(block) {
       if (!block) return null;
       return Array.from(block.querySelectorAll("button.btn.btn-success"))
         .find(btn => (btn.innerText || "").trim().toLowerCase().includes("accept"));
     }
-  
+
     function tryClickPremium() {
       const premiumBlock = findBlockContaining("Premium Confirmation");
       const premiumBtn   = findAcceptBtnInside(premiumBlock);
-  
+
       if (premiumBtn) {
         console.log("%c[VT] Auto Accept PREMIUM → CLICKED", "color: #06b6d4; font-weight:bold;", premiumBtn);
         premiumBtn.click();
@@ -591,11 +564,11 @@ function autoClickSpecificAcceptButtons() {
         setTimeout(tryClickPremium, 200);
       }
     }
-  
+
     function tryClickFamily() {
       const familyBlock = findBlockContaining("Family Appointment");
       const familyBtn   = findAcceptBtnInside(familyBlock);
-  
+
       if (familyBtn) {
         console.log("%c[VT] Auto Accept FAMILY → CLICKED", "color:#22c55e; font-weight:bold;", familyBtn);
         familyBtn.click();
@@ -605,10 +578,7 @@ function autoClickSpecificAcceptButtons() {
       }
     }
   }
-  
+
   autoAcceptPremiumThenFamily();
 
-
 })();
-
-
