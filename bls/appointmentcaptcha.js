@@ -36,7 +36,6 @@
     return el && el.value ? String(el.value) : "";
   }
 
-  // باقي الـ hidden inputs فقط للـ preview
   function getExtraInputs() {
     const extras = [];
     const ignore = new Set([
@@ -220,7 +219,7 @@
     if (!clientVal)
       return { ok: false, reason: "missing ClientData" };
 
-    // ✅ انت بدلت الشرط: نخلي غير 0 هو اللي مرفوض
+    // يكفي صورة واحدة على الأقل
     if (selTokens.length <= 0)
       return { ok: false, reason: "no selected images" };
 
@@ -261,7 +260,7 @@
       params.append(name, value == null ? "" : String(value));
     }
 
-    // ⚠ نحتفظ بنفس الترتيب كما طلبت
+    // الترتيب كما طلبت
     appendField("__RequestVerificationToken", tokenVal);
     appendField("SelectedImages", selectedImagesVal);
     appendField("Data", dataVal);
@@ -309,24 +308,24 @@
 
           const lower = (finalUrl || "").toLowerCase();
 
-          // ✅ إذا رايح لـ VisaType → نتبع redirect
+          // ✅ إذا كان redirect إلى VisaType → تابع طبيعي
           if (lower.includes("/mar/appointment/visatype")) {
-            log("[AC] redirect to VisaType:", finalUrl);
+            log("[AC] redirect to VisaType, following:", finalUrl);
             window.location.href = finalUrl;
           } else {
-            // أي شيء آخر → نعيد تحميل الصفحة الحالية فقط
-            log("[AC] redirect NOT VisaType, reloading current page");
+            // ❌ أي redirect آخر → فقط إعادة تحميل الصفحة الحالية
+            log("[AC] redirect not VisaType, reloading current page");
             window.location.reload();
           }
           return;
         }
 
-        // مافيهش Redirect واضح → reload
+        // ماشي 3xx → نعيد تحميل الصفحة
         log("[AC] no redirect (or status not 3xx), reloading current page");
         window.location.reload();
       })
       .catch((err) => {
-        __sent = false; // في حالة خطأ نسمح بمحاولة أخرى
+        __sent = false;
         console.error(LOG, "fetch AppointmentCaptcha error:", err);
       });
   }
@@ -405,7 +404,7 @@
             }
           });
 
-          // بعد اختيار الصور بنجاح → نرسل الطلب
+          // بعد اختيار الصور → نرسل الطلب
           doCustomSubmitIfReady();
         } catch (e) {
           console.error(LOG, "Error in success handler:", e);
