@@ -1,13 +1,4 @@
-// == CALENDRIA – NewCaptcha/LoginCaptcha
-//  • يقرأ الباسوورد من calendria_captcha_code (storage)
-//  • يملأ فقط الانبوت الأصلي المرئي بالباسوورد
-//  • يعتمد على سكريبت الموقع لنسخ الباسوورد لباقي الخانات إذا وُجد
-//  • يحل الكابتشا عبر NoCaptchaAI ويختار الصور الصحيحة
-//  • يرسل POST LoginCaptchaSubmit عن طريق fetch
-//  • بعدها يجرب فتح /MAR/appointment/newappointment:
-//      - إذا كان redirect إلى /Account/Login → يعيد تحميل الصفحة فقط
-//      - إذا كان صفحة أخرى → يتبعها عادي
-//
+
 (function () {
   "use strict";
 
