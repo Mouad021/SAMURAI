@@ -554,31 +554,61 @@ function autoClickSpecificAcceptButtons() {
 
     return false;
   }
-
-  function tryClick() {
-      if (clickedOnce) return;
+  //----------------------------------------------------------
+  // AUTO ACCEPT: Premium first → then Family  (VisaType ONLY)
+  //----------------------------------------------------------
+  function autoAcceptPremiumThenFamily() {
+    const path = location.pathname.toLowerCase();
+    if (!path.includes("/mar/appointment/visatype")) return;
   
-      const targets = Array.from(document.querySelectorAll("button.btn.btn-success"));
-      const btn = targets.find(isTargetButton);
+    // ننتظر نصف ثانية قبل البدء
+    setTimeout(() => {
+      tryClickPremium();
+    }, 500);
   
-      if (btn) {
-        clickedOnce = true;
-        console.log("%c[VT] Auto ACCEPT → Clicked", "color: #22c55e; font-weight:bold;", btn);
-        btn.click();
-        return true;
-      }
-      return false;
+    function findBlockContaining(text) {
+      const allBlocks = Array.from(document.querySelectorAll("div, h5, span, section"));
+      return allBlocks.find(el => (el.innerText || "").trim().toLowerCase().includes(text.toLowerCase()));
     }
   
-    // محاولة مباشرة
-    tryClick();
+    function findAcceptBtnInside(block) {
+      if (!block) return null;
+      return Array.from(block.querySelectorAll("button.btn.btn-success"))
+        .find(btn => (btn.innerText || "").trim().toLowerCase().includes("accept"));
+    }
   
-    // راقب تغييرات DOM حتى يظهر الزر
-    const obs = new MutationObserver(() => tryClick());
-    obs.observe(document.body, { childList: true, subtree: true });
+    function tryClickPremium() {
+      const premiumBlock = findBlockContaining("Premium Confirmation");
+      const premiumBtn   = findAcceptBtnInside(premiumBlock);
+  
+      if (premiumBtn) {
+        console.log("%c[VT] Auto Accept PREMIUM → CLICKED", "color: #06b6d4; font-weight:bold;", premiumBtn);
+        premiumBtn.click();
+        // ننتظر 0.3 ثانية ثم نمر للفاميلي
+        setTimeout(tryClickFamily, 300);
+      } else {
+        console.warn("[VT] Premium accept button not found yet, retrying...");
+        setTimeout(tryClickPremium, 200);
+      }
+    }
+  
+    function tryClickFamily() {
+      const familyBlock = findBlockContaining("Family Appointment");
+      const familyBtn   = findAcceptBtnInside(familyBlock);
+  
+      if (familyBtn) {
+        console.log("%c[VT] Auto Accept FAMILY → CLICKED", "color:#22c55e; font-weight:bold;", familyBtn);
+        familyBtn.click();
+      } else {
+        console.warn("[VT] Family accept button not found yet, retrying...");
+        setTimeout(tryClickFamily, 200);
+      }
+    }
   }
   
-  autoClickSpecificAcceptButtons();
+  autoAcceptPremiumThenFamily();
+
 
 })();
+
 
