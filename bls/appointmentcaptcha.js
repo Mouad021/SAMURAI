@@ -1,4 +1,4 @@
-// == CALENDRIA AppointmentCaptcha helper (NoCaptchaAI + fetch redirect control) ==
+// == CALENDRIA AppointmentCaptcha helper (NoCaptchaAI + fetch + redirect filter) ==
 (() => {
   "use strict";
 
@@ -11,6 +11,9 @@
   const LOG  = "[CALENDRIA][ApptCaptcha]";
   const log  = (...a) => console.log(LOG, ...a);
   const warn = (...a) => console.warn(LOG, ...a);
+
+  const VISA_URL_PREFIX =
+    "https://www.blsspainmorocco.net/mar/appointment/visatype?data="; // نستخدمها للمقارنة
 
   // ===================== helpers: form + fields =====================
 
@@ -226,16 +229,11 @@
     return { ok: true, reason: "" };
   }
 
-  // ===================== POST عبر fetch =====================
+  // ===================== POST via fetch =====================
 
   let __sent = false;
 
   async function buildAndSubmit() {
-    if (__sent) {
-      warn("buildAndSubmit called twice, skipping");
-      return;
-    }
-
     const form = getForm();
     if (!form) {
       warn("form not found");
@@ -248,11 +246,17 @@
       return;
     }
 
-    const tokenVal  = getTokenValue();
-    const dataVal   = getDataValue();
-    const clientVal = getClientDataValue();
-    const selectedImagesVal = buildSelectedImagesValue();
-    const extras = getExtraInputs();
+    if (__sent) {
+      warn("buildAndSubmit called twice, skipping");
+      return;
+    }
+    __sent = true;
+
+    const tokenVal         = getTokenValue();
+    const dataVal          = getDataValue();
+    const clientVal        = getClientDataValue();
+    const selectedImagesVal= buildSelectedImagesValue();
+    const extras           = getExtraInputs();
 
     const params = new URLSearchParams();
 
@@ -265,7 +269,6 @@
     appendField("SelectedImages", selectedImagesVal);
     appendField("Data", dataVal);
     appendField("ClientData", clientVal);
-
     extras.forEach((f) => appendField(f.name, f.value));
 
     log("[AC] POST payload preview:", Object.fromEntries(params.entries()));
@@ -276,19 +279,15 @@
       await new Promise((r) => setTimeout(r, delayMs));
     }
 
-    __sent = true;
-
     const actionAttr =
-      form.getAttribute("action") || "/MAR/appointment/appointmentcaptcha";
+      form.getAttribute("action") || "/MAR/Appointment/appointmentcaptcha";
     const url = actionAttr.startsWith("http")
       ? actionAttr
       : location.origin + actionAttr;
 
     fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: params.toString(),
       credentials: "same-origin",
       redirect: "manual"
@@ -308,19 +307,19 @@
 
           const lower = (finalUrl || "").toLowerCase();
 
-          // ✅ إذا كان redirect إلى VisaType → تابع طبيعي
-          if (lower.includes("/mar/appointment/visatype")) {
+          // ✅ إذا كان EXACT نفس بداية رابط VisaType → اتبع
+          if (lower.startsWith(VISA_URL_PREFIX)) {
             log("[AC] redirect to VisaType, following:", finalUrl);
-            window.location.href = finalUrl;
+            window.location.href = finalUrl;   // navigation عادي، لا fetch
           } else {
-            // ❌ أي redirect آخر → فقط إعادة تحميل الصفحة الحالية
+            // ❌ أي redirect آخر → reload فقط
             log("[AC] redirect not VisaType, reloading current page");
             window.location.reload();
           }
           return;
         }
 
-        // ماشي 3xx → نعيد تحميل الصفحة
+        // ماشي 3xx → reload
         log("[AC] no redirect (or status not 3xx), reloading current page");
         window.location.reload();
       })
@@ -404,7 +403,7 @@
             }
           });
 
-          // بعد اختيار الصور → نرسل الطلب
+          // بعد اختيار الصور → نرسل الطلب ديالنا
           doCustomSubmitIfReady();
         } catch (e) {
           console.error(LOG, "Error in success handler:", e);
@@ -417,26 +416,25 @@
 
   function setup() {
     const form = getForm();
-    if (form) {
-      form.addEventListener("submit", (ev) => {
-        ev.preventDefault();
-        doCustomSubmitIfReady();
-      });
-    } else {
+    if (!form) {
       warn("AppointmentCaptcha form NOT found");
+      return;
     }
+
+    // نمنع submit العادي → نستعمل منطقنا
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      doCustomSubmitIfReady();
+    });
 
     autoSolveCaptchaIfPossible().catch((e) =>
       console.error(LOG, "autoSolveCaptchaIfPossible error:", e)
     );
 
-    log("AppointmentCaptcha custom handler ready (fetch + redirect check)");
+    log("AppointmentCaptcha custom handler ready (fetch + redirect filter)");
   }
 
-  if (
-    document.readyState === "complete" ||
-    document.readyState === "interactive"
-  ) {
+  if (document.readyState === "complete" || document.readyState === "interactive") {
     setTimeout(setup, 200);
   } else {
     document.addEventListener("DOMContentLoaded", () => setTimeout(setup, 200));
