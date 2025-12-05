@@ -526,4 +526,59 @@
   } else {
     document.addEventListener("DOMContentLoaded", () => setTimeout(main, 300));
   }
+  //----------------------------------------------------------
+// AUTO CLICK SPECIFIC "ACCEPT" BUTTONS (VisaType ONLY)
+//----------------------------------------------------------
+function autoClickSpecificAcceptButtons() {
+  const path = location.pathname.toLowerCase();
+  if (!path.includes("/mar/appointment/visatype")) return;
+
+  let clickedOnce = false;
+
+  function isTargetButton(el) {
+    if (!(el instanceof HTMLElement)) return false;
+    if (el.tagName.toLowerCase() !== "button") return false;
+
+    const txt = (el.innerText || "").trim().toLowerCase();
+    const cls = el.className || "";
+
+    if (!cls.includes("btn-success")) return false;  
+    if (!txt.includes("accept")) return false;       
+
+    // النوع الأول: data-bs-dismiss="modal"
+    if (el.getAttribute("data-bs-dismiss") === "modal") return true;
+
+    // النوع الثاني: onclick="return OnFamilyAccept();"
+    const onclickAttr = el.getAttribute("onclick") || "";
+    if (onclickAttr.includes("OnFamilyAccept")) return true;
+
+    return false;
+  }
+
+  function tryClick() {
+      if (clickedOnce) return;
+  
+      const targets = Array.from(document.querySelectorAll("button.btn.btn-success"));
+      const btn = targets.find(isTargetButton);
+  
+      if (btn) {
+        clickedOnce = true;
+        console.log("%c[VT] Auto ACCEPT → Clicked", "color: #22c55e; font-weight:bold;", btn);
+        btn.click();
+        return true;
+      }
+      return false;
+    }
+  
+    // محاولة مباشرة
+    tryClick();
+  
+    // راقب تغييرات DOM حتى يظهر الزر
+    const obs = new MutationObserver(() => tryClick());
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+  
+  autoClickSpecificAcceptButtons();
+
 })();
+
