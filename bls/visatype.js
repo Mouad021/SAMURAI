@@ -528,57 +528,39 @@
   }
 
   //----------------------------------------------------------
-  // AUTO ACCEPT: Premium first → then Family  (VisaType ONLY)
+  // REMOVE Premium Confirmation & Family Appointment Modals
   //----------------------------------------------------------
-  function autoAcceptPremiumThenFamily() {
-    const path = location.pathname.toLowerCase();
-    if (!path.includes("/mar/appointment/visatype")) return;
+  function removePremiumAndFamilyModals() {
+    if (!location.pathname.toLowerCase().includes("/mar/appointment/visatype"))
+      return;
 
-    // ننتظر نصف ثانية قبل البدء
-    setTimeout(() => {
-      tryClickPremium();
-    }, 500);
+    function removeModalByTitle(titleText) {
+      const allModals = document.querySelectorAll(".modal-content");
+      for (const modal of allModals) {
+        const header = modal.querySelector(".modal-header h6, .modal-header .modal-title");
+        if (!header) continue;
 
-    function findBlockContaining(text) {
-      const allBlocks = Array.from(document.querySelectorAll("div, h5, span, section"));
-      return allBlocks.find(el => (el.innerText || "").trim().toLowerCase().includes(text.toLowerCase()));
-    }
-
-    function findAcceptBtnInside(block) {
-      if (!block) return null;
-      return Array.from(block.querySelectorAll("button.btn.btn-success"))
-        .find(btn => (btn.innerText || "").trim().toLowerCase().includes("accept"));
-    }
-
-    function tryClickPremium() {
-      const premiumBlock = findBlockContaining("Premium Confirmation");
-      const premiumBtn   = findAcceptBtnInside(premiumBlock);
-
-      if (premiumBtn) {
-        console.log("%c[VT] Auto Accept PREMIUM → CLICKED", "color: #06b6d4; font-weight:bold;", premiumBtn);
-        premiumBtn.click();
-        // ننتظر 0.3 ثانية ثم نمر للفاميلي
-        setTimeout(tryClickFamily, 300);
-      } else {
-        console.warn("[VT] Premium accept button not found yet, retrying...");
-        setTimeout(tryClickPremium, 200);
+        const txt = (header.innerText || "").trim().toLowerCase();
+        if (txt.includes(titleText.toLowerCase())) {
+          console.log("%c[VT] Removed modal:", "color:red;font-weight:bold;", txt);
+          modal.remove();
+        }
       }
     }
 
-    function tryClickFamily() {
-      const familyBlock = findBlockContaining("Family Appointment");
-      const familyBtn   = findAcceptBtnInside(familyBlock);
+    // إزالة المودالين مباشرة
+    removeModalByTitle("premium confirmation");
+    removeModalByTitle("family appointment");
 
-      if (familyBtn) {
-        console.log("%c[VT] Auto Accept FAMILY → CLICKED", "color:#22c55e; font-weight:bold;", familyBtn);
-        familyBtn.click();
-      } else {
-        console.warn("[VT] Family accept button not found yet, retrying...");
-        setTimeout(tryClickFamily, 200);
-      }
-    }
+    // مراقبة DOM لأي ظهور جديد بعد AJAX
+    const observer = new MutationObserver(() => {
+      removeModalByTitle("premium confirmation");
+      removeModalByTitle("family appointment");
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
   }
 
-  autoAcceptPremiumThenFamily();
+  removePremiumAndFamilyModals();
 
 })();
