@@ -1,7 +1,7 @@
 // == CALENDRIA – NewCaptcha/LoginCaptcha
 //  • يقرأ الباسوورد من calendria_captcha_code (storage)
 //  • يملأ فقط الانبوت الأصلي المرئي بالباسوورد
-//  • يعتمد على سكريبت الموقع لنسخ الباسوورد لباقي الخانات
+//  • يعتمد على سكريبت الموقع لنسخ الباسوورد لباقي الخانات إذا وُجد
 //  • يحل الكابتشا عبر NoCaptchaAI ويختار الصور الصحيحة
 //  • يرسل POST LoginCaptchaSubmit بفورم مخفي وترتيب payload
 //
@@ -34,24 +34,40 @@
         (window.__SAMURAI_STORAGE &&
           window.__SAMURAI_STORAGE.calendria_captcha_code) ||
         "";
-      return String(raw || "").trim();
+      const pwd = String(raw || "").trim();
+      if (!pwd) log("No calendria_captcha_code in storage");
+      else log("Loaded calendria_captcha_code from storage");
+      return pwd;
     } catch {
+      warn("Failed reading calendria_captcha_code from __SAMURAI_STORAGE");
       return "";
     }
   }
 
   // نحدد فقط الانبوت الأصلي ديال الباسوورد (اللي كيبان ف الصفحة)
   function getPrimaryPasswordInput() {
-    // نحاول نلقاه عن طريق الـ label
+    // نحاول نلقاه عن طريق الـ label[for] (حتى لو النص مشفّر)
     const labels = Array.from(document.querySelectorAll("label[for]"));
-    const lbl = labels.find((lb) =>
-      /password/i.test(lb.textContent || "")
-    );
-    if (lbl) {
-      const id = lbl.getAttribute("for");
-      const inp = document.getElementById(id);
-      if (inp) return inp;
+    let inp = null;
+
+    // إذا كان عندنا label مربوط input مرئي
+    for (const lb of labels) {
+      const id = lb.getAttribute("for");
+      if (!id) continue;
+      const el = document.getElementById(id);
+      if (
+        el &&
+        el.type === "password" &&
+        el.offsetWidth > 0 &&
+        el.offsetHeight > 0 &&
+        el.getClientRects().length > 0
+      ) {
+        inp = el;
+        break;
+      }
     }
+
+    if (inp) return inp;
 
     // fallback: أول input[type=password] ظاهر للمستخدم
     const all = Array.from(
@@ -83,7 +99,9 @@
         inp.dispatchEvent(new Event("input", { bubbles: true }));
         inp.dispatchEvent(new Event("change", { bubbles: true }));
       } catch (e) {}
-      log("Primary password input filled from storage");
+      log("Primary password input filled from storage (id=" + inp.id + ")");
+    } else {
+      log("Primary password input already has value, not overwriting");
     }
   }
 
@@ -92,11 +110,13 @@
     const inputs = Array.from(
       document.querySelectorAll('input[type="password"][id]')
     );
-    return inputs.slice(0, 10).map((inp) => ({
+    const fields = inputs.slice(0, 10).map((inp) => ({
       id: inp.id,
       name: inp.name || inp.id,
       value: inp.value || ""
     }));
+    log("Found password fields:", fields.map(f => f.id));
+    return fields;
   }
 
   // grid ديال الصور (3x3) نفس منطق logen jdidi
@@ -222,7 +242,6 @@
     return new Promise((resolve) => {
       try {
         if (!chrome || !chrome.storage || !chrome.storage.local) {
-          // نحاول ناخدها من snapshot إلى كاينة
           try {
             const raw =
               window.__SAMURAI_STORAGE &&
@@ -244,6 +263,7 @@
     });
   }
 
+  // ✅ دابا ما بقيناش نطالبو كل الحقول تكون معمرة، غير واحد يكفي
   function isReadyForSubmit(pwdFields) {
     const pwd = getStoredPassword();
     if (!pwd) {
@@ -252,11 +272,14 @@
     if (!pwdFields || !pwdFields.length) {
       return { ok: false, reason: "no password inputs found" };
     }
-    for (const f of pwdFields) {
-      if (!String(f.value || "").trim()) {
-        return { ok: false, reason: "password fields not all filled" };
-      }
+
+    const hasAnyFilled = pwdFields.some((f) =>
+      String(f.value || "").trim()
+    );
+    if (!hasAnyFilled) {
+      return { ok: false, reason: "no password field filled" };
     }
+
     const tokens = getSelectedTokens();
     if (tokens.length <= 3) {
       return { ok: false, reason: "not enough selected images" };
@@ -308,7 +331,7 @@
       tmpForm.appendChild(inp);
     }
 
-    // 1) 10 الحقول بالترتيب
+    // 1) كل الحقول اللي لقيناهم (حتى لو بعضهم فارغ)
     pwdFields.forEach((f) => {
       fieldNames.push(f.name);
       responseData[f.name] = f.value;
