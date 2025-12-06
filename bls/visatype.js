@@ -411,11 +411,11 @@
 
     const fd = new FormData(form);
 
-    fd.set("Data",               dataVal);
-    fd.set("DataSource",         dsVal);
-    fd.set("ReCaptchaToken",     recVal);
+    fd.set("Data", dataVal);
+    fd.set("DataSource", dsVal);
+    fd.set("ReCaptchaToken", recVal);
     fd.set("__RequestVerificationToken", tokenVal);
-    fd.set("ResponseData",       JSON.stringify(respObj));
+    fd.set("ResponseData", JSON.stringify(respObj));
 
     const params = new URLSearchParams();
     fd.forEach((v, k) => params.append(k, v));
@@ -431,68 +431,45 @@
     setTimeout(async () => {
       const url = "/MAR/Appointment/VisaType";
       const headers = {
-        "Content-Type":
-          "application/x-www-form-urlencoded",
-        "Accept":
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Cache-Control": "max-age=0",
         "Upgrade-Insecure-Requests": "1"
       };
-
       try {
         log("[VT] sending POST to", url);
-
         const resp = await fetch(url, {
           method: "POST",
           headers,
           body: params.toString(),
           credentials: "include",
-          redirect: "follow"   // نخلي fetch يتبع 302 داخلياً فقط
+          redirect: "manual",
         });
+        log("[VT] POST status:", resp.status);
 
-        log("[VT] FINAL status after follow:", resp.status, resp.url);
+        const qs = new URLSearchParams(location.search || "");
+        const dataFromUrl = qs.get("data") || "";
+        const slotData = dataVal || dataFromUrl;
+        if (!slotData) { warn("[VT] no Data token to go SlotSelection"); return; }
 
-        // 🚦 منطق redirect الصحيح:
-        if (resp.status === 200) {
-          const qs          = new URLSearchParams(location.search || "");
-          const dataFromUrl = qs.get("data") || "";
-          const slotData    = dataVal || dataFromUrl;
-
-          if (!slotData) {
-            warn("[VT] no Data token to go SlotSelection");
-            return;
-          }
-
-          if (chrome?.storage?.local) {
-            chrome.storage.local.get(["calendria_location_name"], (res = {}) => {
-              const rawLoc   = (res.calendria_location_name || "").toString().trim();
-              const locUpper = rawLoc.toUpperCase();
-
-              const slotUrl =
-                "/MAR/Appointment/SlotSelection?data=" +
-                encodeURIComponent(slotData) +
-                (locUpper ? "&loc=" + encodeURIComponent(locUpper) : "");
-
-              log("[VT] Redirect →", slotUrl);
-              location.href = slotUrl;
-            });
-          } else {
+        if (chrome?.storage?.local) {
+          chrome.storage.local.get(["calendria_location_name"], (res = {}) => {
+            const rawLoc   = (res.calendria_location_name || "").toString().trim();
+            const locUpper = rawLoc.toUpperCase();
             const slotUrl =
               "/MAR/Appointment/SlotSelection?data=" +
-              encodeURIComponent(slotData);
-
-            log("[VT] Redirect →", slotUrl);
+              encodeURIComponent(slotData) +
+              (locUpper ? "&loc=" + encodeURIComponent(locUpper) : "");
+            log("[VT] redirect →", slotUrl);
             location.href = slotUrl;
-          }
-
-          return;
+          });
+        } else {
+          const slotUrl =
+            "/MAR/Appointment/SlotSelection?data=" +
+            encodeURIComponent(slotData);
+          log("[VT] redirect →", slotUrl);
+          location.href = slotUrl;
         }
-
-        // ❌ أي رد آخر ≠ 200
-        warn("[VT] response not OK → no redirect (stay on page)");
-        const body = await resp.text();
-        console.warn("[VT] response body preview:", body.slice(0, 200));
-
       } catch (e) {
         console.error(LOG, "error in custom POST", e);
       }
@@ -556,13 +533,17 @@
   function removePremiumAndFamilyModals() {
     if (!location.pathname.toLowerCase().includes("/mar/appointment/visatype"))
       return;
-
+  
+    // تنظيف الأوفرلاي ديال البوتستراب
     function cleanupModalOverlay() {
+      // نحيد جميع الخلفيات السوداء
       document.querySelectorAll(".modal-backdrop").forEach(b => b.remove());
-      document
-        .querySelectorAll(".modal.show, .modal[style*='display: block']")
-        .forEach(m => m.remove());
-
+      // نحاول نحيد أي div.modal باقّي ظاهر ومغطي الصفحة
+      document.querySelectorAll(".modal.show, .modal[style*='display: block']").forEach(m => {
+        m.remove();
+      });
+  
+      // body: نحيد class و styles ديال المودال
       document.body.classList.remove("modal-open");
       if (document.body.style.overflow === "hidden") {
         document.body.style.overflow = "";
@@ -571,13 +552,13 @@
         document.body.style.paddingRight = "";
       }
     }
-
+  
     function removeModalByTitle(titleText) {
       const allContents = document.querySelectorAll(".modal-content");
       for (const content of allContents) {
         const header = content.querySelector(".modal-header h6, .modal-header .modal-title");
         if (!header) continue;
-
+  
         const txt = (header.innerText || "").trim().toLowerCase();
         if (txt.includes(titleText.toLowerCase())) {
           const wrapper = content.closest(".modal") || content;
@@ -586,19 +567,24 @@
         }
       }
     }
-
+  
+    // إزالة المودالين مباشرة
     removeModalByTitle("premium confirmation");
     removeModalByTitle("family appointment");
     cleanupModalOverlay();
-
+  
+    // مراقبة DOM لأي ظهور جديد بعد AJAX
     const observer = new MutationObserver(() => {
       removeModalByTitle("premium confirmation");
       removeModalByTitle("family appointment");
       cleanupModalOverlay();
     });
-
+  
     observer.observe(document.body, { childList: true, subtree: true });
   }
-
+  
   removePremiumAndFamilyModals();
+
+
 })();
+
