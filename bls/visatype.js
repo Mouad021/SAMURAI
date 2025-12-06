@@ -454,7 +454,7 @@
 
         // 🚦 منطق redirect الصحيح:
         if (resp.status === 200) {
-          const qs         = new URLSearchParams(location.search || "");
+          const qs          = new URLSearchParams(location.search || "");
           const dataFromUrl = qs.get("data") || "";
           const slotData    = dataVal || dataFromUrl;
 
@@ -463,23 +463,26 @@
             return;
           }
 
-          const goToSlotSelection = (locUpper) => {
-            const slotUrl =
-              "/MAR/Appointment/SlotSelection?data=" +
-              encodeURIComponent(slotData) +
-              (locUpper ? "&loc=" + encodeURIComponent(locUpper) : "");
-            log("[VT] Redirect →", slotUrl);
-            location.href = slotUrl;
-          };
-
           if (chrome?.storage?.local) {
             chrome.storage.local.get(["calendria_location_name"], (res = {}) => {
               const rawLoc   = (res.calendria_location_name || "").toString().trim();
               const locUpper = rawLoc.toUpperCase();
-              goToSlotSelection(locUpper);
+
+              const slotUrl =
+                "/MAR/Appointment/SlotSelection?data=" +
+                encodeURIComponent(slotData) +
+                (locUpper ? "&loc=" + encodeURIComponent(locUpper) : "");
+
+              log("[VT] Redirect →", slotUrl);
+              location.href = slotUrl;
             });
           } else {
-            goToSlotSelection("");
+            const slotUrl =
+              "/MAR/Appointment/SlotSelection?data=" +
+              encodeURIComponent(slotData);
+
+            log("[VT] Redirect →", slotUrl);
+            location.href = slotUrl;
           }
 
           return;
