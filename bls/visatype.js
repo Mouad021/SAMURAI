@@ -394,40 +394,40 @@
       return;
     }
     window.__cal_vt_sent = true;
-  
+
     const respObj   = buildResponseDataObject(form);
     const respInput = form.querySelector('[name="ResponseData"]');
     if (respInput) respInput.value = JSON.stringify(respObj);
-  
+
     const dataInput  = form.querySelector('[name="Data"]');
     const dsInput    = form.querySelector('[name="DataSource"]');
     const tokenInput = form.querySelector('[name="__RequestVerificationToken"]');
     const recInput   = form.querySelector('[name="ReCaptchaToken"]');
-  
+
     const dataVal  = dataInput  ? dataInput.value  : "";
     const dsVal    = dsInput    ? dsInput.value    : "WEB_BLS";
     const tokenVal = tokenInput ? tokenInput.value : "";
     const recVal   = recInput   ? recInput.value   : "";
-  
+
     const fd = new FormData(form);
-  
+
     fd.set("Data", dataVal);
     fd.set("DataSource", dsVal);
     fd.set("ReCaptchaToken", recVal);
     fd.set("__RequestVerificationToken", tokenVal);
     fd.set("ResponseData", JSON.stringify(respObj));
-  
+
     const params = new URLSearchParams();
     fd.forEach((v, k) => params.append(k, v));
-  
+
     const objPreview = {};
     params.forEach((v, k) => { objPreview[k] = v; });
     log("[VT] FULL BUILT PAYLOAD OBJECT:", objPreview);
     log("[VT] FULL BUILT PAYLOAD RAW:", params.toString());
-  
+
     const delayMs = await loadDelayMs();
     log("[VT] waiting", delayMs, "ms before POST...");
-  
+
     setTimeout(async () => {
       const url = "/MAR/Appointment/VisaType";
       const headers = {
@@ -443,52 +443,19 @@
           headers,
           body: params.toString(),
           credentials: "include",
-          redirect: "manual"   // ⬅️ مهم باش نتحكم في Location
+          redirect: "follow",
         });
         log("[VT] POST status:", resp.status);
-  
-        // نحاول نقرأ Location من الردّ
-        let slotUrl = resp.headers.get("Location") || resp.headers.get("location");
-  
-        // إذا Location ناقص ولا نسبي، نبنيوه يدويّاً باستعمال Data
-        if (!slotUrl) {
-          const qs = new URLSearchParams(location.search || "");
-          const dataFromUrl = qs.get("data") || "";
-          const slotData = dataVal || dataFromUrl;
-          if (!slotData) {
-            warn("[VT] no Data token to build SlotSelection URL");
-          } else {
-            slotUrl = "/MAR/Appointment/SlotSelection?data=" +
-                      encodeURIComponent(slotData);
-          }
-        }
-  
-        if (slotUrl) {
-          // نضمن أنها URL كاملة
-          const finalUrl = new URL(slotUrl, location.origin).toString();
-          log("[VT] follow redirect via fetch ONLY →", finalUrl);
-  
-          try {
-            const slotResp = await fetch(finalUrl, {
-              method: "GET",
-              credentials: "include",
-              redirect: "manual" // ما ندخلش ف redirect أخرى
-            });
-            log("[VT] SlotSelection fetch status:", slotResp.status);
-            // هنا ما كاين حتى location.href → ما كندخلوش للصفحة
-          } catch (e) {
-            warn("[VT] SlotSelection fetch error:", e);
-          }
-        } else {
-          warn("[VT] no slotUrl, skip SlotSelection fetch");
-        }
-  
+
+        // ❌ هنا حيدنا أي منطق ديال SlotSelection
+        // لا dataFromUrl / slotData
+        // لا chrome.storage.local
+        // لا location.href
       } catch (e) {
         console.error(LOG, "error in custom POST", e);
       }
     }, delayMs);
   }
-
 
   // ---------- 10) main ----------
   async function main() {
@@ -601,4 +568,3 @@
 
 
 })();
-
