@@ -394,40 +394,40 @@
       return;
     }
     window.__cal_vt_sent = true;
-
+  
     const respObj   = buildResponseDataObject(form);
     const respInput = form.querySelector('[name="ResponseData"]');
     if (respInput) respInput.value = JSON.stringify(respObj);
-
+  
     const dataInput  = form.querySelector('[name="Data"]');
     const dsInput    = form.querySelector('[name="DataSource"]');
     const tokenInput = form.querySelector('[name="__RequestVerificationToken"]');
     const recInput   = form.querySelector('[name="ReCaptchaToken"]');
-
+  
     const dataVal  = dataInput  ? dataInput.value  : "";
     const dsVal    = dsInput    ? dsInput.value    : "WEB_BLS";
     const tokenVal = tokenInput ? tokenInput.value : "";
     const recVal   = recInput   ? recInput.value   : "";
-
+  
     const fd = new FormData(form);
-
+  
     fd.set("Data", dataVal);
     fd.set("DataSource", dsVal);
     fd.set("ReCaptchaToken", recVal);
     fd.set("__RequestVerificationToken", tokenVal);
     fd.set("ResponseData", JSON.stringify(respObj));
-
+  
     const params = new URLSearchParams();
     fd.forEach((v, k) => params.append(k, v));
-
+  
     const objPreview = {};
     params.forEach((v, k) => { objPreview[k] = v; });
     log("[VT] FULL BUILT PAYLOAD OBJECT:", objPreview);
     log("[VT] FULL BUILT PAYLOAD RAW:", params.toString());
-
+  
     const delayMs = await loadDelayMs();
     log("[VT] waiting", delayMs, "ms before POST...");
-
+  
     setTimeout(async () => {
       const url = "/MAR/Appointment/VisaType";
       const headers = {
@@ -436,26 +436,73 @@
         "Cache-Control": "max-age=0",
         "Upgrade-Insecure-Requests": "1"
       };
+  
       try {
+        // 1) POST VisaType → مايتبعش redirect
         log("[VT] sending POST to", url);
         const resp = await fetch(url, {
           method: "POST",
           headers,
           body: params.toString(),
           credentials: "include",
-          redirect: "follow",
+          redirect: "manual"
         });
         log("[VT] POST status:", resp.status);
-
-        // ❌ هنا حيدنا أي منطق ديال SlotSelection
-        // لا dataFromUrl / slotData
-        // لا chrome.storage.local
-        // لا location.href
+  
+        // نجيب رابط SlotSelection
+        let slotUrl = resp.headers.get("Location") || resp.headers.get("location");
+  
+        // fallback إذا Location فارغ
+        if (!slotUrl) {
+          const qs = new URLSearchParams(location.search || "");
+          const dataFromUrl = qs.get("data") || "";
+          const slotData = dataVal || dataFromUrl;
+          if (!slotData) {
+            warn("[VT] no Data token to build SlotSelection URL");
+            return;
+          }
+          slotUrl =
+            "/MAR/Appointment/SlotSelection?data=" +
+            encodeURIComponent(slotData);
+        }
+  
+        const finalSlotUrl = new URL(slotUrl, location.origin).toString();
+        log("[VT] CHECK SlotSelection →", finalSlotUrl);
+  
+        // 2) GET SlotSelection → حتى هو manual
+        const slotResp = await fetch(finalSlotUrl, {
+          method: "GET",
+          credentials: "include",
+          redirect: "manual"
+        });
+  
+        log("[VT] SlotSelection status:", slotResp.status);
+        const nextLoc = slotResp.headers.get("Location") || slotResp.headers.get("location");
+        if (nextLoc) log("[VT] SlotSelection Location header:", nextLoc);
+  
+        // ✅ الحالة 1: SlotSelection 200 → ندخل للصفحة فوراً
+        if (slotResp.status === 200) {
+          log("[VT] SlotSelection is 200 → navigate to it");
+          location.href = finalSlotUrl;   // document request جديد، بدون NewAppointment
+          return;
+        }
+  
+        // 🚫 الحالة 2: SlotSelection 302 → السيرفر باغي NewAppointment ⇒ نحْبِس هنا
+        if (slotResp.status === 302) {
+          log("[VT] SlotSelection is 302 → do NOT follow to NewAppointment");
+          // لا fetch آخر، لا location.href → ما كاين حتى طلب NewAppointment
+          return;
+        }
+  
+        // أي status آخر للتصحيح فقط
+        warn("[VT] SlotSelection unexpected status:", slotResp.status);
+  
       } catch (e) {
         console.error(LOG, "error in custom POST", e);
       }
     }, delayMs);
   }
+
 
   // ---------- 10) main ----------
   async function main() {
@@ -568,3 +615,4 @@
 
 
 })();
+
