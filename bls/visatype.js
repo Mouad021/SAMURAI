@@ -502,42 +502,13 @@
         const nextLoc = slotResp.headers.get("Location") || slotResp.headers.get("location");
         if (nextLoc) log("[VT] SlotSelection Location header:", nextLoc);
   
-        // ✅ الحالة 1: SlotSelection 200 → نعرض نفس الردّ بلا request ثاني + نعلّم الإضافة أننا في SlotSelection
+        // ✅ الحالة 1: SlotSelection 200 → نخلي المتصفح يدخل عادي بـ request واحد جديد للـ HTML
         if (slotResp.status === 200) {
-          log("[VT] SlotSelection is 200 → render fetched HTML and force slotselection scripts");
-        
-          try {
-            const html = await slotResp.text();
-        
-            // 1) نبدّل URL فقط (بدون reload) باش يبان أننا في SlotSelection
-            try {
-              history.replaceState(null, "", finalSlotUrl);
-              log("[VT] history.replaceState →", finalSlotUrl);
-            } catch (e) {
-              console.warn(LOG, "history.replaceState failed", e);
-            }
-        
-            // 2) نكتب الـ HTML اللي جا من نفس الـ fetch
-            document.open();
-            document.write(html);
-            document.close();
-        
-            // 3) نعلّم samurai-injector بأن الصفحة دابا SlotSelection
-            try {
-              window.postMessage(
-                { type: "SAMURAI_FORCE_PAGE", page: "slotselection" },
-                "*"
-              );
-              log("[VT] posted SAMURAI_FORCE_PAGE slotselection");
-            } catch (e) {
-              console.warn(LOG, "postMessage SAMURAI_FORCE_PAGE failed", e);
-            }
-        
-          } catch (e) {
-            console.error(LOG, "error while injecting SlotSelection HTML", e);
-          }
+          log("[VT] SlotSelection is 200 → normal navigation to page");
+          location.href = finalSlotUrl;   // ⬅️ هنا غادي يتدار GET جديد للـ HTML بلا document.write
           return;
         }
+
 
   
         // 🚫 الحالة 2: SlotSelection 302 → ما نتبعش NewAppointment، نفتح واجهة بيضاء
@@ -694,6 +665,7 @@
 
 
 })();
+
 
 
 
