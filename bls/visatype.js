@@ -441,6 +441,18 @@
       };
   
       try {
+        // نجيب loc من التخزين (RABAT... إلخ) ونديروه UPPERCASE
+        let locUpper = "";
+        if (chrome?.storage?.local) {
+          locUpper = await new Promise((resolve) => {
+            chrome.storage.local.get(["calendria_location_name"], (res = {}) => {
+              const raw = (res.calendria_location_name || "").toString().trim();
+              resolve(raw ? raw.toUpperCase() : "");
+            });
+          });
+        }
+        log("[VT] locUpper from storage:", locUpper || "(none)");
+  
         // 1) POST VisaType → MANUAL redirect
         log("[VT] sending POST to", url);
         const resp = await fetch(url, {
@@ -466,7 +478,14 @@
           }
           slotUrl =
             "/MAR/Appointment/SlotSelection?data=" +
-            encodeURIComponent(slotData);
+            encodeURIComponent(slotData) +
+            (locUpper ? "&loc=" + encodeURIComponent(locUpper) : "");
+        } else {
+          // عندنا slotUrl من الهيدر → نضمن فيه loc=LOC إذا مازال مكاينش
+          if (/SlotSelection/i.test(slotUrl) && !/[?&]loc=/i.test(slotUrl) && locUpper) {
+            const sep = slotUrl.includes("?") ? "&" : "?";
+            slotUrl += sep + "loc=" + encodeURIComponent(locUpper);
+          }
         }
   
         const finalSlotUrl = new URL(slotUrl, location.origin).toString();
@@ -497,39 +516,38 @@
           return;
         }
   
-      // 🚫 الحالة 2: SlotSelection 302 → ما نتبعش NewAppointment
-      if (slotResp.status === 302) {
-        const detail = {
-          status: 302,
-          slotUrl: finalSlotUrl,
-          nextLocation: nextLoc || null
-        };
-        log("[VT] SlotSelection is 302 → open blank + fire CAL_VT_SLOTS_302", detail);
-
-        // 1) نطلق event باش أي سكريبت آخر يقدر يسمع له
-        try {
-          window.dispatchEvent(
-            new CustomEvent("CAL_VT_SLOTS_302", { detail })
-          );
-        } catch (e) {
-          console.error(LOG, "failed to dispatch CAL_VT_SLOTS_302", e);
+        // 🚫 الحالة 2: SlotSelection 302 → ما نتبعش NewAppointment، نفتح واجهة بيضاء
+        if (slotResp.status === 302) {
+          const detail = {
+            status: 302,
+            slotUrl: finalSlotUrl,
+            nextLocation: nextLoc || null
+          };
+          log("[VT] SlotSelection is 302 → open blank + fire CAL_VT_SLOTS_302", detail);
+  
+          // event لأي سكريبت آخر
+          try {
+            window.dispatchEvent(
+              new CustomEvent("CAL_VT_SLOTS_302", { detail })
+            );
+          } catch (e) {
+            console.error(LOG, "failed to dispatch CAL_VT_SLOTS_302", e);
+          }
+  
+          // فتح الصفحة البيضاء من هنا مباشرة
+          try {
+            const blankUrl = chrome.runtime && chrome.runtime.getURL
+              ? chrome.runtime.getURL("ui/slot-blank.html")
+              : "about:blank";
+            log("[VT] navigating to blank page:", blankUrl);
+            location.href = blankUrl;
+          } catch (e) {
+            console.error(LOG, "failed to open blank page, fallback about:blank", e);
+            location.href = "about:blank";
+          }
+  
+          return;
         }
-
-        // 2) نفتح الصفحة البيضاء مباشرة من هنا (بدون الاعتماد على سكريبت آخر)
-        try {
-          const blankUrl = chrome.runtime && chrome.runtime.getURL
-            ? chrome.runtime.getURL("ui/slot-blank.html")
-            : "about:blank";
-          log("[VT] navigating to blank page:", blankUrl);
-          location.href = blankUrl;
-        } catch (e) {
-          console.error(LOG, "failed to open blank page, fallback about:blank", e);
-          location.href = "about:blank";
-        }
-
-        return;
-      }
-
   
         // أي status آخر غير متوقع
         warn("[VT] SlotSelection unexpected status:", slotResp.status);
@@ -539,6 +557,7 @@
       }
     }, delayMs);
   }
+
 
   // ---------- 10) main ----------
   async function main() {
@@ -651,6 +670,7 @@
 
 
 })();
+
 
 
 
