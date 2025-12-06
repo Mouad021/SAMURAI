@@ -395,10 +395,12 @@
     }
     window.__cal_vt_sent = true;
   
+    // نبني ResponseData بنفس منطق الموقع
     const respObj   = buildResponseDataObject(form);
     const respInput = form.querySelector('[name="ResponseData"]');
     if (respInput) respInput.value = JSON.stringify(respObj);
   
+    // نجمع الحقول الأساسية
     const dataInput  = form.querySelector('[name="Data"]');
     const dsInput    = form.querySelector('[name="DataSource"]');
     const tokenInput = form.querySelector('[name="__RequestVerificationToken"]');
@@ -417,6 +419,7 @@
     fd.set("__RequestVerificationToken", tokenVal);
     fd.set("ResponseData", JSON.stringify(respObj));
   
+    // نحولها لـ x-www-form-urlencoded
     const params = new URLSearchParams();
     fd.forEach((v, k) => params.append(k, v));
   
@@ -438,7 +441,7 @@
       };
   
       try {
-        // 1) POST VisaType → مايتبعش redirect
+        // 1) POST VisaType → MANUAL redirect
         log("[VT] sending POST to", url);
         const resp = await fetch(url, {
           method: "POST",
@@ -449,7 +452,7 @@
         });
         log("[VT] POST status:", resp.status);
   
-        // نجيب رابط SlotSelection
+        // نجيب Location → SlotSelection
         let slotUrl = resp.headers.get("Location") || resp.headers.get("location");
   
         // fallback إذا Location فارغ
@@ -469,7 +472,7 @@
         const finalSlotUrl = new URL(slotUrl, location.origin).toString();
         log("[VT] CHECK SlotSelection →", finalSlotUrl);
   
-        // 2) GET SlotSelection → حتى هو manual
+        // 2) GET SlotSelection → حتى هو MANUAL
         const slotResp = await fetch(finalSlotUrl, {
           method: "GET",
           credentials: "include",
@@ -480,21 +483,39 @@
         const nextLoc = slotResp.headers.get("Location") || slotResp.headers.get("location");
         if (nextLoc) log("[VT] SlotSelection Location header:", nextLoc);
   
-        // ✅ الحالة 1: SlotSelection 200 → ندخل للصفحة فوراً
+        // ✅ الحالة 1: SlotSelection 200 → نعرض نفس الردّ بلا request ثاني
         if (slotResp.status === 200) {
-          log("[VT] SlotSelection is 200 → navigate to it");
-          location.href = finalSlotUrl;   // document request جديد، بدون NewAppointment
+          log("[VT] SlotSelection is 200 → render fetched HTML without new request");
+          try {
+            const html = await slotResp.text();
+            document.open();
+            document.write(html);
+            document.close();
+          } catch (e) {
+            console.error(LOG, "error while injecting SlotSelection HTML", e);
+          }
           return;
         }
   
-        // 🚫 الحالة 2: SlotSelection 302 → السيرفر باغي NewAppointment ⇒ نحْبِس هنا
+        // 🚫 الحالة 2: SlotSelection 302 → ما نتبعش NewAppointment، نفتح واجهة بيضاء عبر سكريبت آخر
         if (slotResp.status === 302) {
-          log("[VT] SlotSelection is 302 → do NOT follow to NewAppointment");
-          // لا fetch آخر، لا location.href → ما كاين حتى طلب NewAppointment
+          const detail = {
+            status: 302,
+            slotUrl: finalSlotUrl,
+            nextLocation: nextLoc || null
+          };
+          log("[VT] SlotSelection is 302 → fire CAL_VT_SLOTS_302", detail);
+          try {
+            window.dispatchEvent(
+              new CustomEvent("CAL_VT_SLOTS_302", { detail })
+            );
+          } catch (e) {
+            console.error(LOG, "failed to dispatch CAL_VT_SLOTS_302", e);
+          }
           return;
         }
   
-        // أي status آخر للتصحيح فقط
+        // أي status آخر غير متوقع
         warn("[VT] SlotSelection unexpected status:", slotResp.status);
   
       } catch (e) {
@@ -502,7 +523,6 @@
       }
     }, delayMs);
   }
-
 
   // ---------- 10) main ----------
   async function main() {
@@ -615,4 +635,5 @@
 
 
 })();
+
 
