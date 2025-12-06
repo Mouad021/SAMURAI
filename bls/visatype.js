@@ -497,23 +497,39 @@
           return;
         }
   
-        // 🚫 الحالة 2: SlotSelection 302 → ما نتبعش NewAppointment، نفتح واجهة بيضاء عبر سكريبت آخر
-        if (slotResp.status === 302) {
-          const detail = {
-            status: 302,
-            slotUrl: finalSlotUrl,
-            nextLocation: nextLoc || null
-          };
-          log("[VT] SlotSelection is 302 → fire CAL_VT_SLOTS_302", detail);
-          try {
-            window.dispatchEvent(
-              new CustomEvent("CAL_VT_SLOTS_302", { detail })
-            );
-          } catch (e) {
-            console.error(LOG, "failed to dispatch CAL_VT_SLOTS_302", e);
-          }
-          return;
+      // 🚫 الحالة 2: SlotSelection 302 → ما نتبعش NewAppointment
+      if (slotResp.status === 302) {
+        const detail = {
+          status: 302,
+          slotUrl: finalSlotUrl,
+          nextLocation: nextLoc || null
+        };
+        log("[VT] SlotSelection is 302 → open blank + fire CAL_VT_SLOTS_302", detail);
+
+        // 1) نطلق event باش أي سكريبت آخر يقدر يسمع له
+        try {
+          window.dispatchEvent(
+            new CustomEvent("CAL_VT_SLOTS_302", { detail })
+          );
+        } catch (e) {
+          console.error(LOG, "failed to dispatch CAL_VT_SLOTS_302", e);
         }
+
+        // 2) نفتح الصفحة البيضاء مباشرة من هنا (بدون الاعتماد على سكريبت آخر)
+        try {
+          const blankUrl = chrome.runtime && chrome.runtime.getURL
+            ? chrome.runtime.getURL("ui/slot-blank.html")
+            : "about:blank";
+          log("[VT] navigating to blank page:", blankUrl);
+          location.href = blankUrl;
+        } catch (e) {
+          console.error(LOG, "failed to open blank page, fallback about:blank", e);
+          location.href = "about:blank";
+        }
+
+        return;
+      }
+
   
         // أي status آخر غير متوقع
         warn("[VT] SlotSelection unexpected status:", slotResp.status);
@@ -635,5 +651,6 @@
 
 
 })();
+
 
 
