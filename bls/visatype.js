@@ -503,11 +503,12 @@
         // ✅ الحالة الوحيدة اللي نعتبرها "فيها مواعيد": 200
         if (slotResp.status === 200) {
           log("[VT] SlotSelection is 200 → normal navigation to page");
-          location.href = finalSlotUrl;   // ندخل لصفحة SlotSelection عادي
+          // ندخل لصفحة SlotSelection عادي
+          location.href = finalSlotUrl;
           return;
         }
   
-        // 🚫 أي status آخر (0 = redirect / no slots) → نفتح واجهة SAMURAI REFRESH
+        // 🚫 أي status آخر (0 = redirect / no slots) → نفتح واجهة SAMURAI REFRESH (slot-blank.html)
         const detail = {
           status: slotResp.status,
           slotUrl: finalSlotUrl
@@ -515,10 +516,11 @@
         log(
           "[VT] SlotSelection is NOT 200 (status =",
           slotResp.status,
-          ") → open SAMURAI REFRESH UI",
+          ") → trigger SAMURAI REFRESH UI",
           detail
         );
   
+        // event اختياري (إلى بغيتي شي سكريبت آخر يسمع له)
         try {
           window.dispatchEvent(
             new CustomEvent("CAL_VT_SLOTS_302", { detail })
@@ -527,8 +529,20 @@
           console.error(LOG, "failed to dispatch CAL_VT_SLOTS_302", e);
         }
   
-        // هنا نرسم واجهة ساموراي ريفريش في نفس التاب
-        openSamuraiRefreshUi(finalSlotUrl);
+        // 👇 الرسالة الرئيسية للـ content-main.js باش يفتح slot-blank.html فـ نفس التاب
+        try {
+          window.postMessage(
+            {
+              type: "SAMURAI_OPEN_REFRESH",
+              slotUrl: finalSlotUrl
+            },
+            "*"
+          );
+          log("[VT] posted SAMURAI_OPEN_REFRESH with slotUrl");
+        } catch (e) {
+          console.error(LOG, "failed to post SAMURAI_OPEN_REFRESH", e);
+        }
+  
         return;
   
       } catch (e) {
@@ -650,6 +664,7 @@
 
 
 })();
+
 
 
 
