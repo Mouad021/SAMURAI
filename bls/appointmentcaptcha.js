@@ -1,4 +1,5 @@
-// == CALENDRIA AppointmentCaptcha helper (NoCaptchaAI + native form submit) ==
+// == CALENDRIA AppointmentCaptcha helper
+//   نفس منطق حل LoginCaptcha بالضبط + native form.submit
 (() => {
   "use strict";
 
@@ -6,7 +7,6 @@
   window.__calendria_apptcaptcha_started = true;
 
   const href = (location.href || "").toLowerCase();
-  // نشتغل فقط في صفحة NewAppointment
   if (!href.includes("/mar/appointment/newappointment")) return;
 
   const LOG  = "[CALENDRIA][ApptCaptcha]";
@@ -37,7 +37,7 @@
     return el && el.value ? String(el.value) : "";
   }
 
-  // نضمن وجود حقل SelectedImages و نملأه بالقيمة اللي بنينا من الصور المختارة
+  // نضمن وجود SelectedImages و نملؤه بالتوكينات
   function ensureSelectedImagesInput(form, value) {
     let inp = form.querySelector('input[name="SelectedImages"]');
     if (!inp) {
@@ -49,41 +49,37 @@
     inp.value = value || "";
   }
 
-  // ===================== captcha grid & target =====================
+  // ===================== نفس grid/target ديال LoginCaptcha =====================
 
   function getCaptchaGrid() {
-    try {
-      if (typeof $ === "function" && $.fn && $.fn.jquery) {
-        return $(":has(> .captcha-img):visible")
-          .get()
-          .reduce((acc, cur) => {
-            (acc[Math.floor(cur.offsetTop)] ??= []).push(cur);
-            return acc;
-          }, [])
-          .flatMap((row) => {
-            const sortedByZ = row.sort(
-              (a, b) => getComputedStyle(b).zIndex - getComputedStyle(a).zIndex
-            );
-            const top3 = sortedByZ.slice(0, 3);
-            const sortedByLeft = top3.sort(
-              (a, b) => a.offsetLeft - b.offsetLeft
-            );
-            return sortedByLeft;
-          })
-          .map((el) => el.firstElementChild)
-          .filter(Boolean);
-      }
-    } catch {}
+    if (typeof $ === "function" && $.fn && $.fn.jquery) {
+      return $(":has(> .captcha-img):visible")
+        .get()
+        .reduce((acc, cur) => {
+          (acc[Math.floor(cur.offsetTop)] ??= []).push(cur);
+          return acc;
+        }, [])
+        .flatMap((row) => {
+          const sortedByZ = row.sort(
+            (a, b) => getComputedStyle(b).zIndex - getComputedStyle(a).zIndex
+          );
+          const top3 = sortedByZ.slice(0, 3);
+          const sortedByLeft = top3.sort(
+            (a, b) => a.offsetLeft - b.offsetLeft
+          );
+          return sortedByLeft;
+        })
+        .map((el) => el.firstElementChild)
+        .filter(Boolean);
+    }
 
-    const containers = Array.from(document.querySelectorAll("*")).filter(
-      (el) => {
-        const c = el.firstElementChild;
-        if (!c) return false;
-        if (!c.classList || !c.classList.contains("captcha-img")) return false;
-        const r = el.getClientRects();
-        return r && r.length && el.offsetWidth && el.offsetHeight;
-      }
-    );
+    const containers = Array.from(document.querySelectorAll("*")).filter((el) => {
+      const c = el.firstElementChild;
+      if (!c) return false;
+      if (!c.classList || !c.classList.contains("captcha-img")) return false;
+      const r = el.getClientRects();
+      return r && r.length && el.offsetWidth && el.offsetHeight;
+    });
 
     const byRow = containers.reduce((acc, cur) => {
       (acc[Math.floor(cur.offsetTop)] ??= []).push(cur);
@@ -112,13 +108,14 @@
       if (typeof $ === "function") {
         const labels = $(".box-label").get();
         if (labels.length) {
-          const top = labels.sort(
-            (a, b) => getComputedStyle(b).zIndex - getComputedStyle(a).zIndex
-          )[0];
+          const top = labels
+            .sort(
+              (a, b) => getComputedStyle(b).zIndex - getComputedStyle(a).zIndex
+            )[0];
           return (top.textContent || "").replace(/\D+/g, "").trim();
         }
       }
-    } catch {}
+    } catch (e) {}
 
     const lbls = Array.from(document.querySelectorAll(".box-label"));
     if (!lbls.length) return "";
@@ -209,7 +206,7 @@
     if (!clientVal)
       return { ok: false, reason: "missing ClientData" };
 
-    // يكفي صورة واحدة على الأقل
+    // نفس الفكرة ديال التحقق من الصور لكن نخليه يقبل من 1 فما فوق
     if (selTokens.length <= 0)
       return { ok: false, reason: "no selected images" };
 
@@ -251,7 +248,6 @@
     }
 
     try {
-      // native submit باش ما نصطادش event listeners أخرى
       HTMLFormElement.prototype.submit.call(form);
       log("[AC] native form.submit() called");
     } catch (e) {
@@ -260,7 +256,7 @@
     }
   }
 
-  // ===================== NoCaptchaAI solving =====================
+  // ===================== NoCaptchaAI حل الكابتشا (نفس LoginCaptcha) =====================
 
   async function autoSolveCaptchaIfPossible() {
     if (typeof $ === "undefined" || !$ || !$.post) {
@@ -278,7 +274,7 @@
     const grid   = getCaptchaGrid();
 
     if (!target || !grid || !grid.length) {
-      warn("target أو grid غير متوفرين، تخطي NoCaptchaAI");
+      warn("target أو grid غير متوفرين، تخطّي NoCaptchaAI");
       return;
     }
 
@@ -295,12 +291,12 @@
       dataType: "json",
       data: JSON.stringify({
         method: "ocr",
-        id: "morocco-appt",
-        images: imagesPayload
+        id: "morocco",          // ⬅️ نفس ID ديال LoginCaptcha
+        images: imagesPayload,
       }),
       timeout: 30000,
       beforeSend() {
-        log("Solving appointment captcha via NoCaptchaAI ...");
+        log("Solving captcha via NoCaptchaAI ...");
       },
       complete(xhr, state) {
         log("NoCaptchaAI complete:", state);
@@ -330,7 +326,7 @@
         } catch (e) {
           console.error(LOG, "Error in success handler:", e);
         }
-      }
+      },
     });
   }
 
@@ -343,7 +339,7 @@
       return;
     }
 
-    // نحترم حتى لو استعملت زر Submit يدوي
+    // لو المستخدم ضغط Submit يدوي، نستعمل نفس المنطق
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
       autoSubmitIfReady();
@@ -353,7 +349,7 @@
       console.error(LOG, "autoSolveCaptchaIfPossible error:", e)
     );
 
-    log("AppointmentCaptcha handler ready (NoCaptchaAI + native submit)");
+    log("AppointmentCaptcha handler ready (same logic as LoginCaptcha)");
   }
 
   if (
