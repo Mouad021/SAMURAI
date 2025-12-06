@@ -1,5 +1,10 @@
-// == CALENDRIA AppointmentCaptcha helper
-//   نفس منطق حل LoginCaptcha بالضبط + native form.submit
+// == CALENDRIA AppointmentCaptcha – Fetch + Final URL Check ==
+// - يحل الكابتشا بـ NoCaptchaAI (نفس منطق LoginCaptcha تقريباً)
+// - يبني SelectedImages من الصور المختارة
+// - يرسل POST عبر fetch لـ /MAR/Appointment/appointmentcaptcha
+//   مع redirect: "follow"
+// - إذا الرد النهائي هو VisaType → ندخلو لها
+// - إذا أي صفحة أخرى → نبقى فـ NewAppointment و نرسل fetch إضافي لـ NewAppointment
 (() => {
   "use strict";
 
@@ -37,49 +42,59 @@
     return el && el.value ? String(el.value) : "";
   }
 
-  // نضمن وجود SelectedImages و نملؤه بالتوكينات
-  function ensureSelectedImagesInput(form, value) {
-    let inp = form.querySelector('input[name="SelectedImages"]');
-    if (!inp) {
-      inp = document.createElement("input");
-      inp.type = "hidden";
-      inp.name = "SelectedImages";
-      form.appendChild(inp);
-    }
-    inp.value = value || "";
+  function getExtraInputs() {
+    const extras = [];
+    const ignore = new Set([
+      "__RequestVerificationToken",
+      "SelectedImages",
+      "Data",
+      "ClientData"
+    ]);
+    document
+      .querySelectorAll('input[type="hidden"][name]')
+      .forEach((inp) => {
+        const name = inp.name;
+        if (!name || ignore.has(name)) return;
+        extras.push({ name, value: inp.value || "" });
+      });
+    return extras;
   }
 
-  // ===================== نفس grid/target ديال LoginCaptcha =====================
+  // ===================== grid/target – نفس LoginCaptcha =====================
 
   function getCaptchaGrid() {
-    if (typeof $ === "function" && $.fn && $.fn.jquery) {
-      return $(":has(> .captcha-img):visible")
-        .get()
-        .reduce((acc, cur) => {
-          (acc[Math.floor(cur.offsetTop)] ??= []).push(cur);
-          return acc;
-        }, [])
-        .flatMap((row) => {
-          const sortedByZ = row.sort(
-            (a, b) => getComputedStyle(b).zIndex - getComputedStyle(a).zIndex
-          );
-          const top3 = sortedByZ.slice(0, 3);
-          const sortedByLeft = top3.sort(
-            (a, b) => a.offsetLeft - b.offsetLeft
-          );
-          return sortedByLeft;
-        })
-        .map((el) => el.firstElementChild)
-        .filter(Boolean);
-    }
+    try {
+      if (typeof $ === "function" && $.fn && $.fn.jquery) {
+        return $(":has(> .captcha-img):visible")
+          .get()
+          .reduce((acc, cur) => {
+            (acc[Math.floor(cur.offsetTop)] ??= []).push(cur);
+            return acc;
+          }, [])
+          .flatMap((row) => {
+            const sortedByZ = row.sort(
+              (a, b) => getComputedStyle(b).zIndex - getComputedStyle(a).zIndex
+            );
+            const top3 = sortedByZ.slice(0, 3);
+            const sortedByLeft = top3.sort(
+              (a, b) => a.offsetLeft - b.offsetLeft
+            );
+            return sortedByLeft;
+          })
+          .map((el) => el.firstElementChild)
+          .filter(Boolean);
+      }
+    } catch {}
 
-    const containers = Array.from(document.querySelectorAll("*")).filter((el) => {
-      const c = el.firstElementChild;
-      if (!c) return false;
-      if (!c.classList || !c.classList.contains("captcha-img")) return false;
-      const r = el.getClientRects();
-      return r && r.length && el.offsetWidth && el.offsetHeight;
-    });
+    const containers = Array.from(document.querySelectorAll("*")).filter(
+      (el) => {
+        const c = el.firstElementChild;
+        if (!c) return false;
+        if (!c.classList || !c.classList.contains("captcha-img")) return false;
+        const r = el.getClientRects();
+        return r && r.length && el.offsetWidth && el.offsetHeight;
+      }
+    );
 
     const byRow = containers.reduce((acc, cur) => {
       (acc[Math.floor(cur.offsetTop)] ??= []).push(cur);
@@ -108,10 +123,9 @@
       if (typeof $ === "function") {
         const labels = $(".box-label").get();
         if (labels.length) {
-          const top = labels
-            .sort(
-              (a, b) => getComputedStyle(b).zIndex - getComputedStyle(a).zIndex
-            )[0];
+          const top = labels.sort(
+            (a, b) => getComputedStyle(b).zIndex - getComputedStyle(a).zIndex
+          )[0];
           return (top.textContent || "").replace(/\D+/g, "").trim();
         }
       }
@@ -206,18 +220,17 @@
     if (!clientVal)
       return { ok: false, reason: "missing ClientData" };
 
-    // نفس الفكرة ديال التحقق من الصور لكن نخليه يقبل من 1 فما فوق
     if (selTokens.length <= 0)
       return { ok: false, reason: "no selected images" };
 
     return { ok: true, reason: "" };
   }
 
-  // ===================== native submit =====================
+  // ===================== main submit via fetch =====================
 
   let __sent = false;
 
-  async function autoSubmitIfReady() {
+  async function submitViaFetch() {
     const form = getForm();
     if (!form) {
       warn("form not found");
@@ -231,32 +244,78 @@
     }
 
     if (__sent) {
-      warn("autoSubmitIfReady called twice, skipping");
+      warn("submitViaFetch called twice, skipping");
       return;
     }
     __sent = true;
 
+    const tokenVal          = getTokenValue();
+    const dataVal           = getDataValue();
+    const clientVal         = getClientDataValue();
     const selectedImagesVal = buildSelectedImagesValue();
-    ensureSelectedImagesInput(form, selectedImagesVal);
+    const extras            = getExtraInputs();
 
-    log("[AC] native submit with SelectedImages =", selectedImagesVal);
+    const params = new URLSearchParams();
+
+    function appendField(name, value) {
+      params.append(name, value == null ? "" : String(value));
+    }
+
+    // نفس الترتيب اللي طلبتيه
+    appendField("__RequestVerificationToken", tokenVal);
+    appendField("SelectedImages", selectedImagesVal);
+    appendField("Data", dataVal);
+    appendField("ClientData", clientVal);
+    extras.forEach((f) => appendField(f.name, f.value));
+
+    log("[AC] POST payload preview:", Object.fromEntries(params.entries()));
 
     const delayMs = await loadDelayMs();
     if (delayMs > 0) {
-      log(`[AC] waiting ${delayMs} ms before native form.submit() ...`);
+      log(`[AC] waiting ${delayMs} ms before POST ...`);
       await new Promise((r) => setTimeout(r, delayMs));
     }
 
+    const actionAttr =
+      form.getAttribute("action") || "/MAR/Appointment/appointmentcaptcha";
+    const url = actionAttr.startsWith("http")
+      ? actionAttr
+      : location.origin + actionAttr;
+
     try {
-      HTMLFormElement.prototype.submit.call(form);
-      log("[AC] native form.submit() called");
-    } catch (e) {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+        credentials: "same-origin",
+        redirect: "follow"           // ⬅️ نخلي المتصفح يتبع 302 لكن بدون تغيير الصفحة
+      });
+
+      const finalUrl = (resp.url || "").toLowerCase();
+      log("[AC] fetch completed, final URL =", resp.url, "status =", resp.status);
+
+      if (finalUrl.includes("/MAR/Appointment/VisaType")) {
+        // ✅ نجاح: الرد النهائي VisaType → ندخل لها
+        log("[AC] final URL is VisaType → navigating:", resp.url);
+        window.location.href = resp.url;
+      } else {
+        // ❌ أي صفحة أخرى → نبقى هنا و نرسل فقط fetch NewAppointment
+        log("[AC] final URL is NOT VisaType → staying on page & ping NewAppointment");
+        fetch("/MAR/appointment/newappointment", {
+          method: "GET",
+          credentials: "same-origin",
+          cache: "no-cache"
+        })
+          .then(r => log("[AC] extra NewAppointment fetch status =", r.status))
+          .catch(e => console.warn(LOG, "extra NewAppointment fetch error:", e));
+      }
+    } catch (err) {
       __sent = false;
-      console.error(LOG, "native form.submit error:", e);
+      console.error(LOG, "submitViaFetch error:", err);
     }
   }
 
-  // ===================== NoCaptchaAI حل الكابتشا (نفس LoginCaptcha) =====================
+  // ===================== NoCaptchaAI solving =====================
 
   async function autoSolveCaptchaIfPossible() {
     if (typeof $ === "undefined" || !$ || !$.post) {
@@ -274,7 +333,7 @@
     const grid   = getCaptchaGrid();
 
     if (!target || !grid || !grid.length) {
-      warn("target أو grid غير متوفرين، تخطّي NoCaptchaAI");
+      warn("target أو grid غير متوفرين، تخطي NoCaptchaAI");
       return;
     }
 
@@ -291,12 +350,12 @@
       dataType: "json",
       data: JSON.stringify({
         method: "ocr",
-        id: "morocco",          // ⬅️ نفس ID ديال LoginCaptcha
-        images: imagesPayload,
+        id: "morocco",          // نفس ID المستعمل ف LoginCaptcha
+        images: imagesPayload
       }),
       timeout: 30000,
       beforeSend() {
-        log("Solving captcha via NoCaptchaAI ...");
+        log("Solving appointment captcha via NoCaptchaAI ...");
       },
       complete(xhr, state) {
         log("NoCaptchaAI complete:", state);
@@ -321,12 +380,11 @@
             }
           });
 
-          // بعد اختيار الصور → submit عادي
-          autoSubmitIfReady();
+          submitViaFetch();
         } catch (e) {
           console.error(LOG, "Error in success handler:", e);
         }
-      },
+      }
     });
   }
 
@@ -339,23 +397,20 @@
       return;
     }
 
-    // لو المستخدم ضغط Submit يدوي، نستعمل نفس المنطق
+    // إذا المستخدم ضغط submit يدويًا، نستعمل نفس منطقنا (بدون form.submit)
     form.addEventListener("submit", (ev) => {
       ev.preventDefault();
-      autoSubmitIfReady();
+      submitViaFetch();
     });
 
     autoSolveCaptchaIfPossible().catch((e) =>
       console.error(LOG, "autoSolveCaptchaIfPossible error:", e)
     );
 
-    log("AppointmentCaptcha handler ready (same logic as LoginCaptcha)");
+    log("AppointmentCaptcha handler ready (fetch + final URL check)");
   }
 
-  if (
-    document.readyState === "complete" ||
-    document.readyState === "interactive"
-  ) {
+  if (document.readyState === "complete" || document.readyState === "interactive") {
     setTimeout(setup, 200);
   } else {
     document.addEventListener("DOMContentLoaded", () =>
