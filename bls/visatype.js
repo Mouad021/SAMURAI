@@ -499,50 +499,42 @@
         });
   
         log("[VT] SlotSelection status:", slotResp.status);
-        const nextLoc = slotResp.headers.get("Location") || slotResp.headers.get("location");
-        if (nextLoc) log("[VT] SlotSelection Location header:", nextLoc);
-  
-        // ✅ الحالة 1: SlotSelection 200 → نخلي المتصفح يدخل عادي بـ request واحد جديد للـ HTML
+
+        // ✅ الحالة الوحيدة اللي نعتبرها "فيها مواعيد": 200
         if (slotResp.status === 200) {
           log("[VT] SlotSelection is 200 → normal navigation to page");
-          location.href = finalSlotUrl;   // ⬅️ هنا غادي يتدار GET جديد للـ HTML بلا document.write
+          // هنا خليه بأبسط شكل: طلب HTML عادي
+          location.href = finalSlotUrl;
           return;
         }
-
-
-  
-        // 🚫 الحالة 2: SlotSelection 302 → ما نتبعش NewAppointment، نفتح واجهة بيضاء
-        if (slotResp.status === 302) {
-          const detail = {
-            status: 302,
-            slotUrl: finalSlotUrl,
-            nextLocation: nextLoc || null
-          };
-          log("[VT] SlotSelection is 302 → open blank + fire CAL_VT_SLOTS_302", detail);
-  
-          // event لأي سكريبت آخر
-          try {
-            window.dispatchEvent(
-              new CustomEvent("CAL_VT_SLOTS_302", { detail })
-            );
-          } catch (e) {
-            console.error(LOG, "failed to dispatch CAL_VT_SLOTS_302", e);
-          }
-  
-          // فتح الصفحة البيضاء من هنا مباشرة
-          try {
-            const blankUrl = chrome.runtime && chrome.runtime.getURL
-              ? chrome.runtime.getURL("ui/slot-blank.html")
-              : "about:blank";
-            log("[VT] navigating to blank page:", blankUrl);
-            location.href = blankUrl;
-          } catch (e) {
-            console.error(LOG, "failed to open blank page, fallback about:blank", e);
-            location.href = "about:blank";
-          }
-  
-          return;
+        
+        // 🚫 أي status آخر (0 = redirect / no slots) → نفتح الصفحة البيضاء
+        const detail = {
+          status: slotResp.status,
+          slotUrl: finalSlotUrl
+        };
+        log("[VT] SlotSelection is NOT 200 (status =", slotResp.status, ") → open blank + fire CAL_VT_SLOTS_302", detail);
+        
+        try {
+          window.dispatchEvent(
+            new CustomEvent("CAL_VT_SLOTS_302", { detail })
+          );
+        } catch (e) {
+          console.error(LOG, "failed to dispatch CAL_VT_SLOTS_302", e);
         }
+        
+        try {
+          const blankUrl = chrome.runtime && chrome.runtime.getURL
+            ? chrome.runtime.getURL("ui/slot-blank.html")
+            : "about:blank";
+          log("[VT] navigating to blank page:", blankUrl);
+          location.href = blankUrl;
+        } catch (e) {
+          console.error(LOG, "failed to open blank page, fallback about:blank", e);
+          location.href = "about:blank";
+        }
+        return;
+
   
         // أي status آخر غير متوقع
         warn("[VT] SlotSelection unexpected status:", slotResp.status);
@@ -665,6 +657,7 @@
 
 
 })();
+
 
 
 
