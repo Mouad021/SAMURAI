@@ -447,29 +447,10 @@
         });
         log("[VT] POST status:", resp.status);
 
-        const qs = new URLSearchParams(location.search || "");
-        const dataFromUrl = qs.get("data") || "";
-        const slotData = dataVal || dataFromUrl;
-        if (!slotData) { warn("[VT] no Data token to go SlotSelection"); return; }
-
-        if (chrome?.storage?.local) {
-          chrome.storage.local.get(["calendria_location_name"], (res = {}) => {
-            const rawLoc   = (res.calendria_location_name || "").toString().trim();
-            const locUpper = rawLoc.toUpperCase();
-            const slotUrl =
-              "/MAR/Appointment/SlotSelection?data=" +
-              encodeURIComponent(slotData) +
-              (locUpper ? "&loc=" + encodeURIComponent(locUpper) : "");
-            log("[VT] redirect →", slotUrl);
-            location.href = slotUrl;
-          });
-        } else {
-          const slotUrl =
-            "/MAR/Appointment/SlotSelection?data=" +
-            encodeURIComponent(slotData);
-          log("[VT] redirect →", slotUrl);
-          location.href = slotUrl;
-        }
+        // ❌ هنا حيدنا أي منطق ديال SlotSelection
+        // لا dataFromUrl / slotData
+        // لا chrome.storage.local
+        // لا location.href
       } catch (e) {
         console.error(LOG, "error in custom POST", e);
       }
@@ -587,4 +568,3 @@
 
 
 })();
-
