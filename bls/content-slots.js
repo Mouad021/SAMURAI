@@ -849,6 +849,79 @@
 
     requestAnimationFrame(tick);
   }
+  // =======================================================
+  // TARGET TIMER (كل دقيقة في ثانية + ميلي ثانية محددة)
+  // =======================================================
+  let __targetTimerRunning  = false;
+  let __targetNextFireTs    = null;
+  let __targetFiringNow     = false;
+
+  function stopTargetTimer() {
+    __targetTimerRunning = false;
+    __targetNextFireTs   = null;
+    const disp = document.getElementById("__cal_timer_display");
+    if (disp) disp.textContent = "STOP";
+    showToast("target timer stopped", "info");
+  }
+
+  function scheduleTargetTimer(sec, ms) {
+    const now = new Date();
+    const next = new Date(now.getTime());
+    // نثبت نفس الدقيقة، نغيّر فقط الثانية و الميلي
+    next.setSeconds(sec, ms);
+    if (next <= now) {
+      // إذا فات الوقت، نخليه للدقيقة الجاية
+      next.setMinutes(next.getMinutes() + 1);
+    }
+    __targetNextFireTs   = next.getTime();
+    __targetTimerRunning = true;
+    showToast(
+      `target timer started: every minute at ${sec}s + ${ms}ms`,
+      "info"
+    );
+    targetTimerTick();
+  }
+
+  async function fireTargetOnce() {
+    // نفس المنطق: POST SlotSelection + autoApplicantSelectionCheck
+    try {
+      __targetFiringNow = true;
+      await submitOneHour();
+      await autoApplicantSelectionCheck();
+    } catch (e) {
+      warn("Target timer fire error", e);
+    } finally {
+      __targetFiringNow = false;
+    }
+  }
+
+  function targetTimerTick() {
+    if (!__targetTimerRunning || __targetNextFireTs == null) return;
+
+    const disp = document.getElementById("__cal_timer_display");
+    const nowMs = Date.now();
+    let left = __targetNextFireTs - nowMs;
+
+    if (disp) {
+      if (left > 0) {
+        disp.textContent = (left / 1000).toFixed(3) + "s";
+      } else {
+        disp.textContent = "0.000s";
+      }
+    }
+
+    if (left <= 0 && !__targetFiringNow) {
+      // نضرب POST SlotSelection ديالنا + check
+      fireTargetOnce();
+      // المرة القادمة بعد 60 ثانية بالضبط
+      __targetNextFireTs += 60 * 1000;
+      left = __targetNextFireTs - Date.now();
+    }
+
+    if (__targetTimerRunning) {
+      requestAnimationFrame(targetTimerTick);
+    }
+  }
 
   // =======================================================
   // BUTTONS
@@ -857,53 +930,100 @@
     document.getElementById("btnSubmit")?.remove();
   }
 
-  function injectButtons() {
-    const form = document.querySelector("form");
-    if (!form) return false;
-    if (document.getElementById("__cal_actions_bar")) return true;
-
-    const bar = document.createElement("div");
-    bar.id = "__cal_actions_bar";
-    bar.className = "cal-actions-bar";
-
-    const b1 = document.createElement("button");
-    b1.type = "button";
-    b1.className = "cal-submit-one";
-    b1.textContent = "SUBMIT";
-    b1.onclick = submitOneHour;
-
-    const b2 = document.createElement("button");
-    b2.type = "button";
-    b2.className = "cal-submit-samurai";
-    b2.textContent = "SAMURAI SUBMIT";
-    b2.onclick = async () => {
-      if (SAMURAI_ALL_MODE) await samuraiSubmitAll();
-      else await submitOneHour();
-    };
-
-    const bc = document.createElement("button");
-    bc.type = "button";
-    bc.className = "cal-countdown";
-
-    if (AUTO_ENABLED) {
-      bc.textContent = (AUTO_DELAY_MS / 1000).toFixed(3) + "s";
-      bc.disabled = false;
-      bc.title = "Countdown before auto submit (from DynSlots delay)";
-    } else {
-      bc.textContent = "AUTO OFF";
-      bc.disabled = true;
-      bc.title = "Auto submit disabled (Delays master OFF أو value فارغة)";
+    function injectButtons() {
+      const form = document.querySelector("form");
+      if (!form) return false;
+      if (document.getElementById("__cal_actions_bar")) return true;
+  
+      const bar = document.createElement("div");
+      bar.id = "__cal_actions_bar";
+      bar.className = "cal-actions-bar";
+  
+      const b1 = document.createElement("button");
+      b1.type = "button";
+      b1.className = "cal-submit-one";
+      b1.textContent = "SUBMIT";
+      b1.onclick = submitOneHour;
+  
+      const b2 = document.createElement("button");
+      b2.type = "button";
+      b2.className = "cal-submit-samurai";
+      b2.textContent = "SAMURAI SUBMIT";
+      b2.onclick = async () => {
+        if (SAMURAI_ALL_MODE) await samuraiSubmitAll();
+        else await submitOneHour();
+      };
+  
+      const bc = document.createElement("button");
+      bc.type = "button";
+      bc.className = "cal-countdown";
+  
+      if (AUTO_ENABLED) {
+        bc.textContent = (AUTO_DELAY_MS / 1000).toFixed(3) + "s";
+        bc.disabled = false;
+        bc.title = "Countdown before auto submit (from DynSlots delay)";
+      } else {
+        bc.textContent = "AUTO OFF";
+        bc.disabled = true;
+        bc.title = "Auto submit disabled (Delays master OFF أو value فارغة)";
+      }
+  
+      __countdownBtn = bc;
+  
+      bar.appendChild(b1);
+      bar.appendChild(b2);
+      bar.appendChild(bc);
+  
+      // ====== TARGET TIMER UI (second + ms) ======
+      const timerBox = document.createElement("div");
+      timerBox.className = "cal-timer-box";
+  
+      timerBox.innerHTML = `
+        <div class="cal-timer-row">
+          <label for="__cal_tgt_sec">sec</label>
+          <input id="__cal_tgt_sec" type="number" min="0" max="59" value="0" />
+          <label for="__cal_tgt_ms">ms</label>
+          <input id="__cal_tgt_ms" type="number" min="0" max="999" value="0" />
+          <button type="button" id="__cal_timer_start">START</button>
+          <button type="button" id="__cal_timer_stop">STOP</button>
+        </div>
+        <div class="cal-timer-countdown" id="__cal_timer_display">00.000s</div>
+      `;
+  
+      bar.appendChild(timerBox);
+      form.appendChild(bar);
+  
+      // events ديال التايمر
+      const secInput  = timerBox.querySelector("#__cal_tgt_sec");
+      const msInput   = timerBox.querySelector("#__cal_tgt_ms");
+      const startBtn  = timerBox.querySelector("#__cal_timer_start");
+      const stopBtn   = timerBox.querySelector("#__cal_timer_stop");
+  
+      startBtn.addEventListener("click", () => {
+        let sec = parseInt(secInput.value, 10);
+        let ms  = parseInt(msInput.value, 10);
+  
+        if (isNaN(sec) || sec < 0 || sec > 59) sec = 0;
+        if (isNaN(ms)  || ms < 0  || ms > 999) ms  = 0;
+  
+        secInput.value = String(sec);
+        msInput.value  = String(ms);
+  
+        // لازم تختار slot مرة واحدة قبل تشغيل التايمر
+        if (!__selectedSlotId) {
+          showToast("select slot first", "limit");
+          return;
+        }
+  
+        scheduleTargetTimer(sec, ms);
+      });
+  
+      stopBtn.addEventListener("click", () => {
+        stopTargetTimer();
+      });
+  
+      return true;
     }
-
-    __countdownBtn = bc;
-
-    bar.appendChild(b1);
-    bar.appendChild(b2);
-    bar.appendChild(bc);
-    form.appendChild(bar);
-
-    return true;
-  }
 
   // =======================================================
   // SAMURAI MODE
@@ -997,3 +1117,4 @@
   boot();
 
 })();
+
