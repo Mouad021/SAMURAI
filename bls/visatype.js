@@ -387,148 +387,68 @@
     }
   }
 
-  async function buildPayloadAndSend(form) {
-    if (window.__cal_vt_sent) {
-      warn("already sent once, skipping");
-      return;
-    }
-    window.__cal_vt_sent = true;
-  
-    // نبني ResponseData بنفس منطق الموقع
-    const respObj   = buildResponseDataObject(form);
-    const respInput = form.querySelector('[name="ResponseData"]');
-    if (respInput) respInput.value = JSON.stringify(respObj);
-  
-    // نجمع الحقول الأساسية
-    const dataInput  = form.querySelector('[name="Data"]');
-    const dsInput    = form.querySelector('[name="DataSource"]');
-    const tokenInput = form.querySelector('[name="__RequestVerificationToken"]');
-    const recInput   = form.querySelector('[name="ReCaptchaToken"]');
-  
-    const dataVal  = dataInput  ? dataInput.value  : "";
-    const dsVal    = dsInput    ? dsInput.value    : "WEB_BLS";
-    const tokenVal = tokenInput ? tokenInput.value : "";
-    const recVal   = recInput   ? recInput.value   : "";
-  
-    const fd = new FormData(form);
-  
-    fd.set("Data", dataVal);
-    fd.set("DataSource", dsVal);
-    fd.set("ReCaptchaToken", recVal);
-    fd.set("__RequestVerificationToken", tokenVal);
-    fd.set("ResponseData", JSON.stringify(respObj));
-  
-    // نحولها لـ x-www-form-urlencoded
-    const params = new URLSearchParams();
-    fd.forEach((v, k) => params.append(k, v));
-  
-    const objPreview = {};
-    params.forEach((v, k) => { objPreview[k] = v; });
-    log("[VT] FULL BUILT PAYLOAD OBJECT:", objPreview);
-    log("[VT] FULL BUILT PAYLOAD RAW:", params.toString());
-  
-    const delayMs = await loadDelayMs();
-    log("[VT] waiting", delayMs, "ms before POST...");
-  
-    setTimeout(async () => {
-      const url = "/MAR/Appointment/VisaType";
-      const headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept":
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        "Cache-Control": "max-age=0",
-        "Upgrade-Insecure-Requests": "1",
-      };
-  
-      try {
-        log("[VT] sending POST to", url);
-  
-        // نرسل POST ونخليه manual باش نقرأ Location
-        const resp = await fetch(url, {
-          method: "POST",
-          headers,
-          body: params.toString(),
-          credentials: "include",
-          redirect: "manual",
-        });
-  
-        log("[VT] POST status:", resp.status);
-  
-        // ⬅️ هادي هي إعادة التوجيه "الأصلية": Location من الرد
-        const locHeader =
-          resp.headers.get("Location") || resp.headers.get("location");
-  
-        if (!locHeader) {
-          warn("[VT] no Location header found → cannot follow redirect");
-          // هنا تقدر تختار: تخليه ساكت، ولا دير location.reload()
-          // location.reload();
-          return;
-        }
-  
-        const finalUrl = new URL(locHeader, location.origin).toString();
-        log("[VT] following ORIGINAL redirect to:", finalUrl);
-  
-        // نخلي المتصفح يمشي لنفس الرابط اللي عطاه السيرفر
-        location.href = finalUrl;
-      } catch (e) {
-        console.error(LOG, "error in custom POST", e);
-      }
-    }, delayMs);
-  }
-
 
 
 
   // ---------- 10) main ----------
-  async function main() {
+    async function main() {
     if (!isVisaTypePage()) return;
     log("started");
-
+  
     const form =
       document.getElementById("visatypeform") || document.querySelector("form");
-    if (!form) { warn("no form found"); return; }
-
-    form.addEventListener("submit", e => {
-      e.preventDefault();
-      warn("native form submit intercepted");
-    });
-
+    if (!form) {
+      warn("no form found");
+      return;
+    }
+  
+    // ⚠️ مهم: ما نزيدوش e.preventDefault هنا باش ما نلغيوش منطق الموقع
+    // form.addEventListener("submit", e => {
+    //   e.preventDefault();
+    //   warn("native form submit intercepted");
+    // });
+  
     const arrays  = getPageArrays();
     const choices = await loadPopupChoices();
-
+  
     if (!choices.locName && !choices.vsName && !choices.vsSubName && !choices.catName) {
       warn("choices empty → nothing to do");
       return;
     }
-
+  
     const ids = resolveIds(arrays, choices);
     if (!ids.locationId || !ids.visaTypeId || !ids.visaSubTypeId || !ids.categoryId) {
       warn("missing IDs, abort");
       return;
     }
-
+  
     const fields = findVisibleFieldInputs(form);
     if (fields.locationId)    forceValueIntoField(fields.locationId,    ids.locationId);
     if (fields.visaTypeId)    forceValueIntoField(fields.visaTypeId,    ids.visaTypeId);
     if (fields.visaSubTypeId) forceValueIntoField(fields.visaSubTypeId, ids.visaSubTypeId);
     if (fields.categoryId)    forceValueIntoField(fields.categoryId,    ids.categoryId);
-
+  
     const apptForVal = await getAppointmentForValue(form);
     syncAppointmentFor(form, apptForVal);
-
+  
     // نعطي شوية وقت بسيط باش أي logic داخلي يكمل، ثم نحقن members
     await new Promise(r => setTimeout(r, 150));
     await applyMembersField(form);
-
-    await buildPayloadAndSend(form);
-    log("[VT] done (fields + AppointmentFor + members + POST scheduled)");
+  
+    // 🕒 نستعمل نفس نظام الـ delay ديالك، ولكن مع form.submit() عوض fetch
+    const delayMs = await loadDelayMs();
+    log("[VT] using native form.submit() after", delayMs, "ms");
+  
+    setTimeout(() => {
+      try {
+        log("[VT] calling native form.submit()");
+        form.submit(); // ⬅️ هنا كيخدم المنطق الأصلي ديال الموقع والريديركت الطبيعي
+      } catch (e) {
+        console.error(LOG, "native form submit error", e);
+      }
+    }, delayMs);
   }
 
-  if (document.readyState === "complete" || document.readyState === "interactive") {
-    setTimeout(main, 300);
-  } else {
-    document.addEventListener("DOMContentLoaded", () => setTimeout(main, 300));
-  }
 
   //----------------------------------------------------------
   // REMOVE Premium Confirmation & Family Appointment Modals
@@ -590,6 +510,7 @@
 
 
 })();
+
 
 
 
