@@ -442,6 +442,70 @@ main .card-header h5 {
 .cal-toast-hide {
   animation: cal-toast-out 0.16s ease-in forwards;
 }
+/* ============================
+   TARGET TIMER (second + ms)
+   ============================ */
+
+.cal-timer-box {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 16px;
+  background: #eef2ff;
+  border: 1px dashed rgba(148, 163, 184, 0.9);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cal-timer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cal-timer-row label {
+  font-size: 11px;
+  color: #4b5563;
+}
+
+.cal-timer-row input {
+  width: 64px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.9);
+  padding: 0 8px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.cal-timer-row button {
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.9);
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 12px;
+  cursor: pointer;
+  transition: background-color .12s ease, transform .1s ease;
+}
+
+.cal-timer-row button:hover {
+  background: #e5f3ff;
+  transform: translateY(-1px);
+}
+
+.cal-timer-countdown {
+  margin-top: 4px;
+  width: 100%;
+  text-align: center;
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: 1px;
+  padding: 4px 0;
+  color: #111827;
+}
 
 @keyframes cal-toast-in {
   from {
@@ -464,3 +528,4 @@ main .card-header h5 {
     transform: translateX(18px);
   }
 }
+
