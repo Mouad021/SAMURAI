@@ -387,7 +387,6 @@
     }
   }
 
-  // ---------- 9) POST ----------
   async function buildPayloadAndSend(form) {
     if (window.__cal_vt_sent) {
       warn("already sent once, skipping");
@@ -435,121 +434,48 @@
       const url = "/MAR/Appointment/VisaType";
       const headers = {
         "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
         "Cache-Control": "max-age=0",
-        "Upgrade-Insecure-Requests": "1"
+        "Upgrade-Insecure-Requests": "1",
       };
   
       try {
-        // نجيب loc من التخزين (RABAT... إلخ) ونديروه UPPERCASE
-        let locUpper = "";
-        if (chrome?.storage?.local) {
-          locUpper = await new Promise((resolve) => {
-            chrome.storage.local.get(["calendria_location_name"], (res = {}) => {
-              const raw = (res.calendria_location_name || "").toString().trim();
-              resolve(raw ? raw.toUpperCase() : "");
-            });
-          });
-        }
-        log("[VT] locUpper from storage:", locUpper || "(none)");
-  
-        // 1) POST VisaType → MANUAL redirect
         log("[VT] sending POST to", url);
+  
+        // نرسل POST ونخليه manual باش نقرأ Location
         const resp = await fetch(url, {
           method: "POST",
           headers,
           body: params.toString(),
           credentials: "include",
-          redirect: "manual"
+          redirect: "manual",
         });
+  
         log("[VT] POST status:", resp.status);
   
-        // نجيب Location → SlotSelection
-        let slotUrl = resp.headers.get("Location") || resp.headers.get("location");
+        // ⬅️ هادي هي إعادة التوجيه "الأصلية": Location من الرد
+        const locHeader =
+          resp.headers.get("Location") || resp.headers.get("location");
   
-        // fallback إذا Location فارغ
-        if (!slotUrl) {
-          const qs = new URLSearchParams(location.search || "");
-          const dataFromUrl = qs.get("data") || "";
-          const slotData = dataVal || dataFromUrl;
-          if (!slotData) {
-            warn("[VT] no Data token to build SlotSelection URL");
-            return;
-          }
-          slotUrl =
-            "/MAR/Appointment/SlotSelection?data=" +
-            encodeURIComponent(slotData) +
-            (locUpper ? "&loc=" + encodeURIComponent(locUpper) : "");
-        } else {
-          // عندنا slotUrl من الهيدر → نضمن فيه loc=LOC إذا مازال مكاينش
-          if (/SlotSelection/i.test(slotUrl) && !/[?&]loc=/i.test(slotUrl) && locUpper) {
-            const sep = slotUrl.includes("?") ? "&" : "?";
-            slotUrl += sep + "loc=" + encodeURIComponent(locUpper);
-          }
-        }
-  
-        const finalSlotUrl = new URL(slotUrl, location.origin).toString();
-        log("[VT] CHECK SlotSelection →", finalSlotUrl);
-  
-        // 2) GET SlotSelection → حتى هو MANUAL
-        const slotResp = await fetch(finalSlotUrl, {
-          method: "GET",
-          credentials: "include",
-          redirect: "manual"
-        });
-  
-        log("[VT] SlotSelection status:", slotResp.status);
-  
-        // ✅ الحالة الوحيدة اللي نعتبرها "فيها مواعيد": 200
-        if (slotResp.status === 200) {
-          log("[VT] SlotSelection is 200 → normal navigation to page");
-          // ندخل لصفحة SlotSelection عادي
-          location.href = finalSlotUrl;
+        if (!locHeader) {
+          warn("[VT] no Location header found → cannot follow redirect");
+          // هنا تقدر تختار: تخليه ساكت، ولا دير location.reload()
+          // location.reload();
           return;
         }
   
-        // 🚫 أي status آخر (0 = redirect / no slots) → نفتح واجهة SAMURAI REFRESH (slot-blank.html)
-        const detail = {
-          status: slotResp.status,
-          slotUrl: finalSlotUrl
-        };
-        log(
-          "[VT] SlotSelection is NOT 200 (status =",
-          slotResp.status,
-          ") → trigger SAMURAI REFRESH UI",
-          detail
-        );
+        const finalUrl = new URL(locHeader, location.origin).toString();
+        log("[VT] following ORIGINAL redirect to:", finalUrl);
   
-        // event اختياري (إلى بغيتي شي سكريبت آخر يسمع له)
-        try {
-          window.dispatchEvent(
-            new CustomEvent("CAL_VT_SLOTS_302", { detail })
-          );
-        } catch (e) {
-          console.error(LOG, "failed to dispatch CAL_VT_SLOTS_302", e);
-        }
-  
-        // 👇 الرسالة الرئيسية للـ content-main.js باش يفتح slot-blank.html فـ نفس التاب
-        try {
-          window.postMessage(
-            {
-              type: "SAMURAI_OPEN_REFRESH",
-              slotUrl: finalSlotUrl
-            },
-            "*"
-          );
-          log("[VT] posted SAMURAI_OPEN_REFRESH with slotUrl");
-        } catch (e) {
-          console.error(LOG, "failed to post SAMURAI_OPEN_REFRESH", e);
-        }
-  
-        return;
-  
+        // نخلي المتصفح يمشي لنفس الرابط اللي عطاه السيرفر
+        location.href = finalUrl;
       } catch (e) {
         console.error(LOG, "error in custom POST", e);
       }
     }, delayMs);
   }
+
 
 
 
@@ -664,6 +590,7 @@
 
 
 })();
+
 
 
 
