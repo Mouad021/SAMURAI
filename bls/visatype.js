@@ -1,5 +1,3 @@
-// == CALENDRIA VisaType helper (FULL AUTO POST with fetch + true ResponseData) ==
-
 (function () {
   if (window.__calendria_vt_injected) return;
   window.__calendria_vt_injected = true;
@@ -387,68 +385,112 @@
     }
   }
 
-
-
-
-  // ---------- 10) main ----------
-    async function main() {
-    if (!isVisaTypePage()) return;
-    log("started");
-  
-    const form =
-      document.getElementById("visatypeform") || document.querySelector("form");
-    if (!form) {
-      warn("no form found");
+  async function buildPayloadAndSend(form) {
+    if (window.__cal_vt_sent) {
+      warn("already sent once, skipping");
       return;
     }
+    window.__cal_vt_sent = true;
   
-    // ⚠️ مهم: ما نزيدوش e.preventDefault هنا باش ما نلغيوش منطق الموقع
-    // form.addEventListener("submit", e => {
-    //   e.preventDefault();
-    //   warn("native form submit intercepted");
-    // });
+    // نبني ResponseData بنفس منطق الموقع
+    const respObj   = buildResponseDataObject(form);
+    const respInput = form.querySelector('[name="ResponseData"]');
+    if (respInput) respInput.value = JSON.stringify(respObj);
   
-    const arrays  = getPageArrays();
-    const choices = await loadPopupChoices();
+    // نجمع الحقول الأساسية فقط لضمان أنهم معمّرين صح
+    const dataInput  = form.querySelector('[name="Data"]');
+    const dsInput    = form.querySelector('[name="DataSource"]');
+    const tokenInput = form.querySelector('[name="__RequestVerificationToken"]');
+    const recInput   = form.querySelector('[name="ReCaptchaToken"]');
   
-    if (!choices.locName && !choices.vsName && !choices.vsSubName && !choices.catName) {
-      warn("choices empty → nothing to do");
-      return;
+    const dataVal  = dataInput  ? dataInput.value  : "";
+    const dsVal    = dsInput    ? dsInput.value    : "WEB_BLS";
+    const tokenVal = tokenInput ? tokenInput.value : "";
+    const recVal   = recInput   ? recInput.value   : "";
+  
+    // نحدّث القيم داخل الفورم (غير تأكيد)
+    if (dataInput)  dataInput.value  = dataVal;
+    if (dsInput)    dsInput.value    = dsVal;
+    if (tokenInput) tokenInput.value = tokenVal;
+    if (recInput)   recInput.value   = recVal;
+  
+    // (اختياري) نطبع preview ديال القيم اللي غادي تمشي فالفورم
+    try {
+      const fdPreview = new FormData(form);
+      const objPreview = {};
+      fdPreview.forEach((v, k) => { objPreview[k] = v; });
+      log("[VT] PREVIEW NATIVE FORM PAYLOAD:", objPreview);
+    } catch (e) {
+      console.warn(LOG, "failed to build preview FormData", e);
     }
   
-    const ids = resolveIds(arrays, choices);
-    if (!ids.locationId || !ids.visaTypeId || !ids.visaSubTypeId || !ids.categoryId) {
-      warn("missing IDs, abort");
-      return;
-    }
-  
-    const fields = findVisibleFieldInputs(form);
-    if (fields.locationId)    forceValueIntoField(fields.locationId,    ids.locationId);
-    if (fields.visaTypeId)    forceValueIntoField(fields.visaTypeId,    ids.visaTypeId);
-    if (fields.visaSubTypeId) forceValueIntoField(fields.visaSubTypeId, ids.visaSubTypeId);
-    if (fields.categoryId)    forceValueIntoField(fields.categoryId,    ids.categoryId);
-  
-    const apptForVal = await getAppointmentForValue(form);
-    syncAppointmentFor(form, apptForVal);
-  
-    // نعطي شوية وقت بسيط باش أي logic داخلي يكمل، ثم نحقن members
-    await new Promise(r => setTimeout(r, 150));
-    await applyMembersField(form);
-  
-    // 🕒 نستعمل نفس نظام الـ delay ديالك، ولكن مع form.submit() عوض fetch
     const delayMs = await loadDelayMs();
-    log("[VT] using native form.submit() after", delayMs, "ms");
+    log("[VT] will use NATIVE form.submit() after", delayMs, "ms");
   
     setTimeout(() => {
       try {
         log("[VT] calling native form.submit()");
-        form.submit(); // ⬅️ هنا كيخدم المنطق الأصلي ديال الموقع والريديركت الطبيعي
+        // ⬅️ هنا ما كاين لا fetch لا redirect: "manual"
+        // المتصفح هو اللي غادي يدير POST + redirect بنفس منطق الموقع
+        form.submit();
       } catch (e) {
         console.error(LOG, "native form submit error", e);
       }
     }, delayMs);
   }
 
+
+
+  // ---------- 10) main ----------
+  async function main() {
+    if (!isVisaTypePage()) return;
+    log("started");
+
+    const form =
+      document.getElementById("visatypeform") || document.querySelector("form");
+    if (!form) { warn("no form found"); return; }
+
+    form.addEventListener("submit", e => {
+      e.preventDefault();
+      warn("native form submit intercepted");
+    });
+
+    const arrays  = getPageArrays();
+    const choices = await loadPopupChoices();
+
+    if (!choices.locName && !choices.vsName && !choices.vsSubName && !choices.catName) {
+      warn("choices empty → nothing to do");
+      return;
+    }
+
+    const ids = resolveIds(arrays, choices);
+    if (!ids.locationId || !ids.visaTypeId || !ids.visaSubTypeId || !ids.categoryId) {
+      warn("missing IDs, abort");
+      return;
+    }
+
+    const fields = findVisibleFieldInputs(form);
+    if (fields.locationId)    forceValueIntoField(fields.locationId,    ids.locationId);
+    if (fields.visaTypeId)    forceValueIntoField(fields.visaTypeId,    ids.visaTypeId);
+    if (fields.visaSubTypeId) forceValueIntoField(fields.visaSubTypeId, ids.visaSubTypeId);
+    if (fields.categoryId)    forceValueIntoField(fields.categoryId,    ids.categoryId);
+
+    const apptForVal = await getAppointmentForValue(form);
+    syncAppointmentFor(form, apptForVal);
+
+    // نعطي شوية وقت بسيط باش أي logic داخلي يكمل، ثم نحقن members
+    await new Promise(r => setTimeout(r, 150));
+    await applyMembersField(form);
+
+    await buildPayloadAndSend(form);
+    log("[VT] done (fields + AppointmentFor + members + POST scheduled)");
+  }
+
+  if (document.readyState === "complete" || document.readyState === "interactive") {
+    setTimeout(main, 300);
+  } else {
+    document.addEventListener("DOMContentLoaded", () => setTimeout(main, 300));
+  }
 
   //----------------------------------------------------------
   // REMOVE Premium Confirmation & Family Appointment Modals
@@ -510,15 +552,3 @@
 
 
 })();
-
-
-
-
-
-
-
-
-
-
-
-
