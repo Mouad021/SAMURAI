@@ -1,11 +1,7 @@
 // SAMURAI/functions/signal.js
 
-// تخزين بسيط في الذاكرة
-const state = {};
-
-// ===== CORS Helpers =====
 const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*", // تقدر تحدد origin ديالك إلا بغيتي
+  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
@@ -20,7 +16,7 @@ function jsonResponse(body, status = 200) {
   });
 }
 
-// Preflight (OPTIONS) للـ POST من الإضافة / EXE
+// preflight
 export function onRequestOptions() {
   return new Response(null, {
     status: 204,
@@ -28,7 +24,31 @@ export function onRequestOptions() {
   });
 }
 
-function ensureCategory(cat) {
+const KV_KEY = "samurai-signal-state";
+
+// helper: read state from KV
+async function loadState(env) {
+  try {
+    const txt = await env.SIGNAL_KV.get(KV_KEY);
+    if (!txt) return {};
+    return JSON.parse(txt);
+  } catch (e) {
+    return {};
+  }
+}
+
+// helper: save state to KV (مع صلاحية 60 ثانية)
+async function saveState(env, state) {
+  try {
+    await env.SIGNAL_KV.put(KV_KEY, JSON.stringify(state), {
+      expirationTtl: 60, // seconds
+    });
+  } catch (e) {
+    // silent
+  }
+}
+
+function ensureCategory(state, cat) {
   if (!state[cat]) {
     state[cat] = {
       first: null,
@@ -38,16 +58,17 @@ function ensureCategory(cat) {
   return state[cat];
 }
 
-// POST /signal  <-- من SAMURAI_SIGNAL (Python)
-export async function onRequestPost({ request }) {
+// POST /signal  <-- من EXE
+export async function onRequestPost({ request, env }) {
   try {
     const data = await request.json();
     const cat   = data.category || "UNKNOWN";
-    const which = data.which || "unknown"; // "first" أو "second"
+    const which = data.which || "unknown";
     const secs  = data.seconds;
     const label = data.label;
 
-    const bucket = ensureCategory(cat);
+    let state = await loadState(env);
+    const bucket = ensureCategory(state, cat);
 
     if (which === "first") {
       bucket.first = {
@@ -63,13 +84,16 @@ export async function onRequestPost({ request }) {
       };
     }
 
+    await saveState(env, state);
+
     return jsonResponse({ ok: true, category: cat, which, current: bucket }, 200);
   } catch (e) {
     return jsonResponse({ ok: false, error: String(e) }, 400);
   }
 }
 
-// GET /signal  <-- من الإضافة (slot-blank.js)
-export async function onRequestGet() {
+// GET /signal  <-- من الإضافة
+export async function onRequestGet({ env }) {
+  const state = await loadState(env);
   return jsonResponse({ ok: true, state }, 200);
 }
