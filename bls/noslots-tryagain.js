@@ -1,121 +1,104 @@
 (function () {
   "use strict";
 
-  if (window.__calendria_noslots_retry_started) return;
-  window.__calendria_noslots_retry_started = true;
+  if (window.__samurai_global_retry) return;
+  window.__samurai_global_retry = true;
 
-  const LOG  = "[CALENDRIA][NoSlotsRetry]";
-  const log  = (...a) => console.log(LOG, ...a);
+  const LOG = "[SAMURAI][GLOBAL-RETRY]";
+  const log = (...a) => console.log(LOG, ...a);
   const warn = (...a) => console.warn(LOG, ...a);
 
-  const NO_SLOTS_TEXT_SNIPPET      = "currently, no slots are available";
-  const INVALID_CAPTCHA_TEXT_SNIP  = "the captcha you submitted is invalid";
-  const NEW_APPOINTMENT_URL        =
-    "https://www.blsspainmorocco.net/MAR/appointment/newappointment";
-  const TRY_AGAIN_HREF_SNIPPET     = "/mar/appointment/newappointment";
+  // ===============================
+  // FLAGS لحماية الطلبات من التكرار
+  // ===============================
+  let noSlotHandled = false;
+  let formWarningHandled = false;
 
-  let observer       = null;
-  let actionDone     = false; // باش مايتعاودش لا كليك لا ريديركت
-
-  function getAlertsTextLower() {
+  // ==========================================
+  // 1) GET النصوص داخل ALERTS (lower-case)
+  // ==========================================
+  function getPageTextLower() {
     try {
-      const alerts = Array.from(
-        document.querySelectorAll(
-          ".alert, .alert-warning, .alert-danger, .col-12.alert, .col-12.alert-warning"
-        )
-      );
-      return alerts
-        .map((el) => (el.textContent || "").trim().toLowerCase())
-        .join(" ");
-    } catch (e) {
-      warn("getAlertsTextLower error:", e);
+      return document.body.innerText.toLowerCase();
+    } catch {
       return "";
     }
   }
 
-  function tryHandleInvalidCaptcha() {
-    const allText = getAlertsTextLower();
-    if (!allText) return false;
+  // ==================================================================
+  // 2) منطق NO SLOTS يعمل في أي صفحة يظهر فيها "no slots are available"
+  // ==================================================================
+  function handleNoSlotsIfAny() {
+    if (noSlotHandled) return false;
 
-    if (allText.includes(INVALID_CAPTCHA_TEXT_SNIP)) {
-      log("Detected 'The captcha you submitted is invalid' → redirecting to NewAppointment");
-      actionDone = true;
-      try {
-        if (observer) observer.disconnect();
-      } catch (e) {}
-      // إعادة التوجيه مباشرة
-      window.location.assign(NEW_APPOINTMENT_URL);
+    const text = getPageTextLower();
+    if (!text.includes("no slots") && !text.includes("currently, no slots")) {
+      return false;
+    }
+
+    // نحاول نضغط TRY AGAIN
+    const retry = document.querySelector(
+      `a[href*="newappointment"], button[onclick*="NewAppointment"], button[formaction*="newappointment"]`
+    );
+
+    if (retry) {
+      noSlotHandled = true;
+
+      log("NO SLOTS detected → clicking Try Again");
+      try { retry.click(); }
+      catch (e) { warn("retry click failed", e); }
+
       return true;
     }
+
     return false;
   }
 
-  function tryHandleNoSlotsClick() {
-    const allText = getAlertsTextLower();
-    if (!allText) return false;
+  // ===============================================================================
+  // 3) منطق صفحة "لم تكمل البيانات" يعمل في أي صفحة يظهر فيها التحذير أو الزر
+  // ===============================================================================
+  const WARNING_SNIPPET = "you have not filled out and completed the applicant";
+  const BUTTON_TEXT_SNIP = "click here to complete application form";
 
-    if (!allText.includes(NO_SLOTS_TEXT_SNIPPET)) {
-      return false;
-    }
+  function handleFormIncompleteIfAny() {
+    if (formWarningHandled) return false;
 
-    // نحاول نلقاو زر/لينك "Try again" اللي كيمشي لـ NewAppointment
-    const retryLink =
-      document.querySelector(`a[href*="${TRY_AGAIN_HREF_SNIPPET}"]`) ||
-      document.querySelector(`button[onclick*="NewAppointment"]`) ||
-      document.querySelector(`button[formaction*="${TRY_AGAIN_HREF_SNIPPET}"]`);
+    const txt = getPageTextLower();
 
-    if (!retryLink) {
-      warn("No-slots alert found but retry link not found yet");
-      return false;
-    }
+    const btn = [...document.querySelectorAll("button, a")]
+      .find(el =>
+        (el.innerText || "").trim().toLowerCase().includes(BUTTON_TEXT_SNIP)
+      );
 
-    log("Found 'no slots' alert + retry link → clicking it once");
-    try {
-      retryLink.click();
-    } catch (e) {
-      try {
-        retryLink.dispatchEvent(
-          new MouseEvent("click", { bubbles: true, cancelable: true })
-        );
-      } catch (e2) {
-        warn("Failed to click retry link:", e2);
-      }
-    }
-    actionDone = true;
-    try {
-      if (observer) observer.disconnect();
-    } catch (e) {}
+    if (!txt.includes(WARNING_SNIPPET) && !btn) return false;
+
+    formWarningHandled = true;
+
+    log("Detected FORM-INCOMPLETE warning → sending /myappointments request");
+
+    fetch("https://www.blsspainmorocco.net/MAR/appointmentdata/myappointments", {
+      method: "GET",
+      credentials: "include",
+      cache: "no-cache"
+    })
+      .then(r => log("MyAppointments status =", r.status))
+      .catch(e => warn("MyAppointments error", e));
+
     return true;
   }
 
-  function checkPage() {
-    if (actionDone) return;
-
-    // 1️⃣ أولوية لرسالة الكابتشا غير صحيحة → ريديركت مباشر
-    if (tryHandleInvalidCaptcha()) return;
-
-    // 2️⃣ إذا ماكايناش رسالة كابتشا، نشوف "no slots" ونكليك على try-again
-    tryHandleNoSlotsClick();
+  // ===============================
+  // تشغيل الفحص مباشرة + مراقبة DOM
+  // ===============================
+  function checkAll() {
+    handleNoSlotsIfAny();
+    handleFormIncompleteIfAny();
   }
 
-  // نجرّب مباشرة بعد تحميل السكربت
-  setTimeout(checkPage, 50);
+  setTimeout(checkAll, 100);
 
-  // مراقبة الـ DOM حتى إذا ظهرت الرسالة لاحقاً (AJAX أو تحديث جزئي)
-  try {
-    observer = new MutationObserver(() => {
-      checkPage();
-    });
+  const obs = new MutationObserver(() => checkAll());
+  obs.observe(document.body, { childList: true, subtree: true });
 
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-  } catch (e) {
-    warn("MutationObserver error:", e);
-  }
-
-  log(
-    "NoSlotsRetry script loaded (watching for 'no slots' and 'captcha invalid' alerts)"
-  );
+  log("GLOBAL RETRY SCRIPT ACTIVE (NoSlots + FormIncomplete)");
 })();
