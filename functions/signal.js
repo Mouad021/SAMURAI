@@ -1,10 +1,33 @@
 // SAMURAI/functions/signal.js
 
-// تخزين بسيط في الذاكرة (لكل instance ديال ال-worker)
-// كيسجّل آخر توقيت FIRST / SECOND لكل كاتيجوري
+// تخزين بسيط في الذاكرة
 const state = {};
 
-// Helper صغير باش نضمنو وجود الكاتيجوري
+// ===== CORS Helpers =====
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*", // تقدر تحدد origin ديالك إلا بغيتي
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+
+function jsonResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      ...CORS_HEADERS,
+    },
+  });
+}
+
+// Preflight (OPTIONS) للـ POST من الإضافة / EXE
+export function onRequestOptions() {
+  return new Response(null, {
+    status: 204,
+    headers: CORS_HEADERS,
+  });
+}
+
 function ensureCategory(cat) {
   if (!state[cat]) {
     state[cat] = {
@@ -15,46 +38,38 @@ function ensureCategory(cat) {
   return state[cat];
 }
 
-// POST /signal  --> كيتلقى البيانات من سكريبت SAMURAI_SIGNAL
+// POST /signal  <-- من SAMURAI_SIGNAL (Python)
 export async function onRequestPost({ request }) {
   try {
     const data = await request.json();
-    const cat    = data.category || "UNKNOWN";
-    const which  = data.which || "unknown";   // "first" أو "second"
-    const secs   = data.seconds;
-    const label  = data.label;
+    const cat   = data.category || "UNKNOWN";
+    const which = data.which || "unknown"; // "first" أو "second"
+    const secs  = data.seconds;
+    const label = data.label;
 
     const bucket = ensureCategory(cat);
 
     if (which === "first") {
-      bucket.first = { seconds: secs, label, updatedAt: new Date().toISOString() };
+      bucket.first = {
+        seconds: secs,
+        label,
+        updatedAt: new Date().toISOString(),
+      };
     } else if (which === "second") {
-      bucket.second = { seconds: secs, label, updatedAt: new Date().toISOString() };
+      bucket.second = {
+        seconds: secs,
+        label,
+        updatedAt: new Date().toISOString(),
+      };
     }
 
-    // نرجع OK + الحالة الحالية ديال داك الكاتيجوري
-    return new Response(
-      JSON.stringify({ ok: true, category: cat, which, current: bucket }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }
-    );
+    return jsonResponse({ ok: true, category: cat, which, current: bucket }, 200);
   } catch (e) {
-    return new Response(
-      JSON.stringify({ ok: false, error: String(e) }),
-      {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      }
-    );
+    return jsonResponse({ ok: false, error: String(e) }, 400);
   }
 }
 
-// GET /signal  --> يرجع جميع الكاتيجوري/times (باش الإضافة تقدر تقراهم)
+// GET /signal  <-- من الإضافة (slot-blank.js)
 export async function onRequestGet() {
-  return new Response(JSON.stringify({ ok: true, state }), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
+  return jsonResponse({ ok: true, state }, 200);
 }
