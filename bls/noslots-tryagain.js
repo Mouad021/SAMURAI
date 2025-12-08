@@ -4,30 +4,25 @@
   if (window.__samurai_global_retry) return;
   window.__samurai_global_retry = true;
 
-  const LOG = "[SAMURAI][GLOBAL-RETRY]";
-  const log = (...a) => console.log(LOG, ...a);
+  const LOG  = "[SAMURAI][GLOBAL-RETRY]";
+  const log  = (...a) => console.log(LOG, ...a);
   const warn = (...a) => console.warn(LOG, ...a);
 
-  // ===============================
-  // FLAGS لحماية الطلبات من التكرار
-  // ===============================
-  let noSlotHandled = false;
-  let formWarningHandled = false;
+  // حماية من التكرار
+  let noSlotHandled       = false;
+  let formWarningHandled  = false;
 
-  // ==========================================
-  // 1) GET النصوص داخل ALERTS (lower-case)
-  // ==========================================
+  const MYAPPTS_URL = "https://www.blsspainmorocco.net/MAR/appointmentdata/myappointments";
+
+  // قراءة نصوص الصفحة
   function getPageTextLower() {
-    try {
-      return document.body.innerText.toLowerCase();
-    } catch {
-      return "";
-    }
+    try { return document.body.innerText.toLowerCase(); }
+    catch { return ""; }
   }
 
-  // ==================================================================
-  // 2) منطق NO SLOTS يعمل في أي صفحة يظهر فيها "no slots are available"
-  // ==================================================================
+  // =====================================================
+  // 1️⃣ NO SLOTS — يشتغل في أي صفحة يظهر فيها "no slots"
+  // =====================================================
   function handleNoSlotsIfAny() {
     if (noSlotHandled) return false;
 
@@ -36,17 +31,20 @@
       return false;
     }
 
-    // نحاول نضغط TRY AGAIN
+    // نبحث عن Try Again
     const retry = document.querySelector(
-      `a[href*="newappointment"], button[onclick*="NewAppointment"], button[formaction*="newappointment"]`
+      `a[href*="NewAppointment"], 
+       a[href*="newappointment"],
+       button[onclick*="NewAppointment"],
+       button[formaction*="NewAppointment"]`
     );
 
     if (retry) {
       noSlotHandled = true;
+      log("NO SLOTS detected → clicking TRY AGAIN");
 
-      log("NO SLOTS detected → clicking Try Again");
       try { retry.click(); }
-      catch (e) { warn("retry click failed", e); }
+      catch (e) { warn("TryAgain click failed:", e); }
 
       return true;
     }
@@ -54,11 +52,12 @@
     return false;
   }
 
-  // ===============================================================================
-  // 3) منطق صفحة "لم تكمل البيانات" يعمل في أي صفحة يظهر فيها التحذير أو الزر
-  // ===============================================================================
-  const WARNING_SNIPPET = "you have not filled out and completed the applicant";
-  const BUTTON_TEXT_SNIP = "click here to complete application form";
+  // ===============================================================
+  // 2️⃣ FORM-INCOMPLETE — redirect فعلي نحو /myappointments
+  // ===============================================================
+
+  const WARNING_SNIPPET   = "you have not filled out and completed the applicant";
+  const BUTTON_TEXT_SNIP  = "click here to complete application form";
 
   function handleFormIncompleteIfAny() {
     if (formWarningHandled) return false;
@@ -66,29 +65,23 @@
     const txt = getPageTextLower();
 
     const btn = [...document.querySelectorAll("button, a")]
-      .find(el =>
-        (el.innerText || "").trim().toLowerCase().includes(BUTTON_TEXT_SNIP)
-      );
+      .find(el => (el.innerText || "").trim().toLowerCase().includes(BUTTON_TEXT_SNIP));
 
+    // إذا ظهرت الرسالة أو الزر → نذهب مباشرة لصفحة myappointments
     if (!txt.includes(WARNING_SNIPPET) && !btn) return false;
 
     formWarningHandled = true;
 
-    log("Detected FORM-INCOMPLETE warning → sending /myappointments request");
+    log("FORM-INCOMPLETE detected → redirecting to /myappointments");
 
-    fetch("https://www.blsspainmorocco.net/MAR/appointmentdata/myappointments", {
-      method: "GET",
-      credentials: "include",
-      cache: "no-cache"
-    })
-      .then(r => log("MyAppointments status =", r.status))
-      .catch(e => warn("MyAppointments error", e));
+    // 🚀 الدخول فعلياً للصفحة — بدون fetch
+    window.location.href = MYAPPTS_URL;
 
     return true;
   }
 
   // ===============================
-  // تشغيل الفحص مباشرة + مراقبة DOM
+  // تشغيل الفحص + مراقبة DOM
   // ===============================
   function checkAll() {
     handleNoSlotsIfAny();
