@@ -371,7 +371,6 @@
     }
 
     if (radioToClick) {
-      // نستعمل click باش يتنفذ OnAppointmentForChange(event,'xxxx')
       radioToClick.click();
       log("[VT] AppointmentFor radio clicked:", apptForVal, radioToClick.id || radioToClick.name);
     } else {
@@ -391,30 +390,26 @@
       return;
     }
     window.__cal_vt_sent = true;
-  
-    // نبني ResponseData بنفس منطق الموقع
+
     const respObj   = buildResponseDataObject(form);
     const respInput = form.querySelector('[name="ResponseData"]');
     if (respInput) respInput.value = JSON.stringify(respObj);
-  
-    // نجمع الحقول الأساسية فقط لضمان أنهم معمّرين صح
+
     const dataInput  = form.querySelector('[name="Data"]');
     const dsInput    = form.querySelector('[name="DataSource"]');
     const tokenInput = form.querySelector('[name="__RequestVerificationToken"]');
     const recInput   = form.querySelector('[name="ReCaptchaToken"]');
-  
+
     const dataVal  = dataInput  ? dataInput.value  : "";
     const dsVal    = dsInput    ? dsInput.value    : "WEB_BLS";
     const tokenVal = tokenInput ? tokenInput.value : "";
     const recVal   = recInput   ? recInput.value   : "";
-  
-    // نحدّث القيم داخل الفورم (غير تأكيد)
+
     if (dataInput)  dataInput.value  = dataVal;
     if (dsInput)    dsInput.value    = dsVal;
     if (tokenInput) tokenInput.value = tokenVal;
     if (recInput)   recInput.value   = recVal;
-  
-    // (اختياري) نطبع preview ديال القيم اللي غادي تمشي فالفورم
+
     try {
       const fdPreview = new FormData(form);
       const objPreview = {};
@@ -423,15 +418,13 @@
     } catch (e) {
       console.warn(LOG, "failed to build preview FormData", e);
     }
-  
+
     const delayMs = await loadDelayMs();
     log("[VT] will use NATIVE form.submit() after", delayMs, "ms");
-  
+
     setTimeout(() => {
       try {
         log("[VT] calling native form.submit()");
-        // ⬅️ هنا ما كاين لا fetch لا redirect: "manual"
-        // المتصفح هو اللي غادي يدير POST + redirect بنفس منطق الموقع
         form.submit();
       } catch (e) {
         console.error(LOG, "native form submit error", e);
@@ -439,12 +432,51 @@
     }, delayMs);
   }
 
+  // ---------- 🆕 تخزين data من رابط VisaType ----------
+  function storeVisaTypeDataFromUrl() {
+    try {
+      const href = window.location.href || "";
+      const url  = new URL(href);
+      const dataParam = url.searchParams.get("data") || "";
 
+      if (!dataParam) {
+        log("[VT] no data= param in URL");
+        return;
+      }
+      if (!chrome?.storage?.local) {
+        log("[VT] chrome.storage.local not available, skip saving data");
+        return;
+      }
+
+      const base   = `${url.origin}/MAR/Appointment/SlotSelection`;
+      const qs     = new URLSearchParams();
+      qs.set("data", dataParam);
+      const slotUrl = `${base}?${qs.toString()}`;
+
+      chrome.storage.local.set(
+        {
+          samurai_slot_data: dataParam,
+          samurai_slot_url:  slotUrl
+        },
+        () => {
+          log("[VT] stored slot data from URL:", {
+            data: dataParam,
+            slotUrl
+          });
+        }
+      );
+    } catch (e) {
+      warn("[VT] failed to store slot data from URL", e);
+    }
+  }
 
   // ---------- 10) main ----------
   async function main() {
     if (!isVisaTypePage()) return;
     log("started");
+
+    // نخزن data من رابط VisaType فـ الستوريج
+    storeVisaTypeDataFromUrl();
 
     const form =
       document.getElementById("visatypeform") || document.querySelector("form");
@@ -478,7 +510,6 @@
     const apptForVal = await getAppointmentForValue(form);
     syncAppointmentFor(form, apptForVal);
 
-    // نعطي شوية وقت بسيط باش أي logic داخلي يكمل، ثم نحقن members
     await new Promise(r => setTimeout(r, 150));
     await applyMembersField(form);
 
@@ -498,17 +529,13 @@
   function removePremiumAndFamilyModals() {
     if (!location.pathname.toLowerCase().includes("/mar/appointment/visatype"))
       return;
-  
-    // تنظيف الأوفرلاي ديال البوتستراب
+
     function cleanupModalOverlay() {
-      // نحيد جميع الخلفيات السوداء
       document.querySelectorAll(".modal-backdrop").forEach(b => b.remove());
-      // نحاول نحيد أي div.modal باقّي ظاهر ومغطي الصفحة
       document.querySelectorAll(".modal.show, .modal[style*='display: block']").forEach(m => {
         m.remove();
       });
-  
-      // body: نحيد class و styles ديال المودال
+
       document.body.classList.remove("modal-open");
       if (document.body.style.overflow === "hidden") {
         document.body.style.overflow = "";
@@ -517,13 +544,13 @@
         document.body.style.paddingRight = "";
       }
     }
-  
+
     function removeModalByTitle(titleText) {
       const allContents = document.querySelectorAll(".modal-content");
       for (const content of allContents) {
         const header = content.querySelector(".modal-header h6, .modal-header .modal-title");
         if (!header) continue;
-  
+
         const txt = (header.innerText || "").trim().toLowerCase();
         if (txt.includes(titleText.toLowerCase())) {
           const wrapper = content.closest(".modal") || content;
@@ -532,23 +559,20 @@
         }
       }
     }
-  
-    // إزالة المودالين مباشرة
+
     removeModalByTitle("premium confirmation");
     removeModalByTitle("family appointment");
     cleanupModalOverlay();
-  
-    // مراقبة DOM لأي ظهور جديد بعد AJAX
+
     const observer = new MutationObserver(() => {
       removeModalByTitle("premium confirmation");
       removeModalByTitle("family appointment");
       cleanupModalOverlay();
     });
-  
+
     observer.observe(document.body, { childList: true, subtree: true });
   }
-  
-  removePremiumAndFamilyModals();
 
+  removePremiumAndFamilyModals();
 
 })();
