@@ -287,7 +287,7 @@
     if (!raw.startsWith("/")) raw = "/MAR/appointment/" + raw;
 
     const idx = raw.toLowerCase().indexOf("appointmentdate=");
-    if (idx !== -1) {
+       if (idx !== -1) {
       const after = raw.slice(idx + "appointmentdate=".length);
       return { prefix: raw.slice(0, idx + "appointmentdate=".length), suffix: after };
     }
@@ -654,12 +654,26 @@
     };
   }
 
+  // =======================================================
+  // FORMDATA
+  // =======================================================
+  function snapshotBasePayload(form) {
+    const controls = Array.from(form.querySelectorAll("input[name], select[name], textarea[name]"));
+    const base = {};
+    controls.forEach(el => {
+      if (!el.name) return;
+      if (el.name === "ResponseData") return;
+      base[el.name] = el.value ?? "";
+    });
+    return { base, controls };
+  }
+
   function buildFormDataForSlot({ dateText, slotId, base, controls, form }) {
     const payloadObj = { ...base };
-  
+
     if (__dateName) payloadObj[__dateName] = dateText;
     if (__slotName) payloadObj[__slotName] = String(slotId);
-  
+
     payloadObj.AppointmentFor =
       form.querySelector('input[name="AppointmentFor"]')?.value ||
       payloadObj.AppointmentFor ||
@@ -674,8 +688,8 @@
       "";
     payloadObj.__RequestVerificationToken =
       getToken() || payloadObj.__RequestVerificationToken || "";
-  
-    // -------- التعديل الوحيد هنا --------
+
+    // ===== ResponseData: فقط المفاتيح المشفرة =====
     const respObj = {};
     const SKIP_IN_RESP = new Set([
       "Data",
@@ -685,21 +699,20 @@
       "Loc",
       "__RequestVerificationToken",
     ]);
-  
+
     for (const key in payloadObj) {
-      if (SKIP_IN_RESP.has(key)) continue; // ما ندخلوش هاد المفاتيح فـ ResponseData
-  
+      if (SKIP_IN_RESP.has(key)) continue;
+
       if (key === __dateName)      respObj[key] = dateText;
       else if (key === __slotName) respObj[key] = String(slotId);
       else                         respObj[key] = "";
     }
-    // ------------------------------------
-  
+
     const respStr = JSON.stringify(respObj);
-  
+
     const respEl = form.querySelector('input[name="ResponseData"]');
     if (respEl) respEl.value = respStr;
-  
+
     const fd = new FormData();
     const SPECIAL = new Set([
       "Data",
@@ -709,27 +722,25 @@
       "Loc",
       "__RequestVerificationToken",
     ]);
-  
-    controls.forEach((el) => {
+
+    controls.forEach(el => {
       const name = el.name;
       if (!name || SPECIAL.has(name)) return;
       fd.append(name, payloadObj[name] ?? "");
     });
-  
+
     if ("Data" in payloadObj) fd.append("Data", payloadObj.Data ?? "");
     fd.append("ResponseData", respStr);
     fd.append("AppointmentFor", payloadObj.AppointmentFor ?? "");
-    fd.append("SearchDate", payloadObj.SearchDate ?? "");
-    fd.append("Loc", payloadObj.Loc ?? "");
+    fd.append("SearchDate",     payloadObj.SearchDate     ?? "");
+    fd.append("Loc",            payloadObj.Loc            ?? "");
     fd.append(
       "__RequestVerificationToken",
       payloadObj.__RequestVerificationToken ?? ""
     );
-  
+
     return fd;
   }
-
-
 
   const MAX_RETRIES_502 = 5;
 
@@ -1235,5 +1246,3 @@
   boot();
 
 })();
-
-
