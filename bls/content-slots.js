@@ -1071,7 +1071,73 @@
 
     log("Auto sequence finished");
   }
+  // =======================================================
+  // RACE: 3 GetAvailableSlotsByDate, keep first 200, abort rest
+  // =======================================================
+  function raceGetSlotsOnFirstDays(availDays, maxDays = 3) {
+    if (!__tpl) return;
+    if (!Array.isArray(availDays) || !availDays.length) return;
 
+    const chosen = availDays.slice(0, maxDays);
+    if (!chosen.length) return;
+
+    let winnerChosen = false;
+    const controllers = [];
+
+    chosen.forEach((d) => {
+      if (!d || !d.DateText) return;
+
+      const dateText = d.DateText;
+      const ctrl = new AbortController();
+      controllers.push(ctrl);
+
+      fetchSlotsForDate(__tpl, dateText, ctrl.signal)
+        .then((j) => {
+          if (winnerChosen) return; // راه كاين واحد سبق
+          winnerChosen = true;
+
+          // أوقف بقية الطلبات اللي باقيين
+          controllers.forEach((c) => {
+            if (c !== ctrl) {
+              try { c.abort(); } catch {}
+            }
+          });
+
+          // مرّر النتيجة للمنطق العادي ديالنا
+          const url = __tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix;
+          onAnyGetAvailableSlots(url, j);
+
+          // حدّث الواجهة: خلي اليوم اللي ربح هو المختار
+          __lastRandomDayText = dateText;
+          if (__dateEl) __dateEl.value = dateText;
+
+          const trigger = document.getElementById("__cal_date_trigger");
+          const popup   = document.getElementById("__cal_days_popup");
+          if (trigger) trigger.textContent = dateText;
+
+          if (popup) {
+            popup
+              .querySelectorAll(".cal-day-btn")
+              .forEach((btn) => {
+                if (!btn.dataset.dateText) return;
+                if (btn.dataset.dateText === dateText) {
+                  btn.classList.add("cal-day-selected");
+                } else {
+                  btn.classList.remove("cal-day-selected");
+                }
+              });
+          }
+
+          showToast(`slots loaded for ${dateText}`, "info");
+        })
+        .catch((err) => {
+          // إذا كان فقط AbortError ما ندير والو
+          if (err && err.name === "AbortError") return;
+          console.warn("[CALENDRIA][DynSlots] race request error for", dateText, err);
+        });
+    });
+  }
+ 
   // =======================================================
   // BOOT
   // =======================================================
@@ -1097,17 +1163,8 @@
     hideOriginalDateWidget();
     ensureDaysPicker(availDays);
 
-    const randomDay = pickRandomDay(availDays);
-    if (randomDay) {
-      const trigger = document.getElementById("__cal_date_trigger");
-      const popup = document.getElementById("__cal_days_popup");
-      const btn =
-        popup.querySelector(`.cal-day-btn[data-date-text="${CSS.escape(randomDay.DateText)}"]`) ||
-        popup.querySelector(".cal-day-btn");
-      if (btn && trigger && popup) {
-        await selectDay(randomDay.DateText, btn, trigger, popup);
-      }
-    }
+    // بدل randomDay: دابا غادي نرسل 3 طلبات على تواريخ مختلفة
+    raceGetSlotsOnFirstDays(availDays, 3);
 
     if (AUTO_ENABLED) {
       runAutoSequence().catch(e => warn("Auto sequence error", e));
@@ -1117,4 +1174,5 @@
   boot();
 
 })();
+
 
