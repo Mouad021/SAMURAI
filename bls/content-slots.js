@@ -1137,77 +1137,87 @@
   }
 
   // =======================================================
-  // RACE: 3 GetAvailableSlotsByDate, keep only winner
+  // RACE: 3 GetAvailableSlotsByDate, نختار آخر واحد نجح بـ 200
   // =======================================================
   function raceGetSlotsOnFirstDays(availDays, maxDays = 3, onWinnerReady) {
     if (!__tpl) return;
     if (!Array.isArray(availDays) || !availDays.length) return;
-
+  
     const chosen = availDays.slice(0, maxDays);
     if (!chosen.length) return;
-
-    let winnerChosen = false;
-    const controllers = [];
-
-    chosen.forEach((d) => {
-      if (!d || !d.DateText) return;
-
+  
+    let pending = chosen.length;
+    const results = new Array(chosen.length);
+    __raceWinnerReady = false;
+  
+    chosen.forEach((d, idx) => {
+      if (!d || !d.DateText) {
+        pending--;
+        return;
+      }
+  
       const dateText = d.DateText;
-      const ctrl = new AbortController();
-      controllers.push(ctrl);
-
-      fetchSlotsForDate(__tpl, dateText, ctrl.signal, true)
+  
+      fetchSlotsForDate(__tpl, dateText, undefined, true)
         .then((j) => {
-          if (winnerChosen) return; // شي واحد سبق، ما ندير والو
-          winnerChosen = true;
-          __raceWinnerReady = true; // دابا الرابح ديال GET جاهز
-
-          // نكانسلو جميع الطلبات الآخرين
-          controllers.forEach((c) => {
-            if (c !== ctrl) {
-              try { c.abort(); } catch {}
+          results[idx] = { ok: true, dateText, json: j };
+        })
+        .catch((err) => {
+          results[idx] = { ok: false, dateText, err };
+        })
+        .finally(() => {
+          pending--;
+          if (pending > 0) return; // مازال كاينين طلبات خدامين
+  
+          // هنا: الثلاثة سالاو، نختار "آخر واحد" ok من اللائحة
+          let winner = null;
+          for (let i = results.length - 1; i >= 0; i--) {
+            if (results[i] && results[i].ok) {
+              winner = results[i];
+              break;
             }
-          });
-
-          // مرّر النتيجة للمنطق العادي ديال السلوطات
-          const url = __tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix;
-          onAnyGetAvailableSlots(url, j);
-
-          // نخلي هاد اليوم هو اللي ظاهر فـ UI
-          __lastRandomDayText = dateText;
-          if (__dateEl) __dateEl.value = dateText;
-
+          }
+  
+          if (!winner) {
+            console.warn("[CALENDRIA][DynSlots] no successful race result");
+            return;
+          }
+  
+          const { dateText: winDate, json } = winner;
+  
+          __raceWinnerReady = true;
+  
+          const url = __tpl.prefix + encodeURIComponent(winDate) + __tpl.suffix;
+          onAnyGetAvailableSlots(url, json);
+  
+          // نخلي اليوم الفائز ظاهر في الـ UI
+          __lastRandomDayText = winDate;
+          if (__dateEl) __dateEl.value = winDate;
+  
           const trigger = document.getElementById("__cal_date_trigger");
           const popup   = document.getElementById("__cal_days_popup");
-          if (trigger) trigger.textContent = dateText;
-
+          if (trigger) trigger.textContent = winDate;
+  
           if (popup) {
             popup
               .querySelectorAll(".cal-day-btn")
               .forEach((btn) => {
-                if (!btn.dataset.dateText) return;
-                if (btn.dataset.dateText === dateText) {
-                  btn.classList.add("cal-day-selected");
-                } else {
-                  btn.classList.remove("cal-day-selected");
-                }
+                const dt = btn.dataset.dateText;
+                if (!dt) return;
+                if (dt === winDate) btn.classList.add("cal-day-selected");
+                else                btn.classList.remove("cal-day-selected");
               });
           }
-
-          showToast(`slots loaded for ${dateText}`, "info");
-
-          // من بعد ما الرابح يكمّل، نسمح لأي منطق إضافي (مثلاً AUTO)
+  
+          showToast(`slots loaded for ${winDate}`, "info");
+  
           if (typeof onWinnerReady === "function") {
-            onWinnerReady(dateText);
+            onWinnerReady(winDate);
           }
-        })
-        .catch((err) => {
-          // AbortError عادي ما نطبع والو
-          if (err && err.name === "AbortError") return;
-          console.warn("[CALENDRIA][DynSlots] race request error for", dateText, err);
         });
     });
   }
+
 
   // =======================================================
   // BOOT
@@ -1246,3 +1256,4 @@
   boot();
 
 })();
+
