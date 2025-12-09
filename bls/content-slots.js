@@ -667,47 +667,88 @@
     });
     return { base, controls };
   }
-
+  
   function buildFormDataForSlot({ dateText, slotId, base, controls, form }) {
     const payloadObj = { ...base };
-
+  
+    // نحدّث قيم التاريخ والساعة داخل الفورم
     if (__dateName) payloadObj[__dateName] = dateText;
     if (__slotName) payloadObj[__slotName] = String(slotId);
-
-    payloadObj.AppointmentFor = form.querySelector('input[name="AppointmentFor"]')?.value || payloadObj.AppointmentFor || "";
-    payloadObj.SearchDate     = form.querySelector('input[name="SearchDate"]')?.value     || payloadObj.SearchDate     || "";
-    payloadObj.Loc            = form.querySelector('input[name="Loc"]')?.value            || payloadObj.Loc            || "";
-    payloadObj.__RequestVerificationToken = getToken() || payloadObj.__RequestVerificationToken || "";
-
+  
+    // قيم ضرورية للسيرفر (لكن *لا تدخل* في ResponseData)
+    payloadObj.AppointmentFor =
+      form.querySelector('input[name="AppointmentFor"]')?.value ||
+      payloadObj.AppointmentFor ||
+      "";
+  
+    payloadObj.SearchDate =
+      form.querySelector('input[name="SearchDate"]')?.value ||
+      payloadObj.SearchDate ||
+      "";
+  
+    payloadObj.Loc =
+      form.querySelector('input[name="Loc"]')?.value ||
+      payloadObj.Loc ||
+      "";
+  
+    payloadObj.__RequestVerificationToken =
+      getToken() || payloadObj.__RequestVerificationToken || "";
+  
+    // =====================================================
+    //  بناء ResponseData الصحيح: فقط الحقول المشفرة
+    //  بدون Data / Loc / AppointmentFor / Token …
+    // =====================================================
+  
     const respObj = {};
+  
     for (const key in payloadObj) {
-      if (key === __dateName)      respObj[key] = dateText;
-      else if (key === __slotName) respObj[key] = String(slotId);
-      else                         respObj[key] = "";
+      // نحتفظ فقط بالمفاتيح "المشفّرة" مثل:
+      // jsewripq – bkzqql – yejcnnp – wuicd ...
+      if (
+        key !== "Data" &&
+        key !== "AppointmentFor" &&
+        key !== "SearchDate" &&
+        key !== "Loc" &&
+        key !== "__RequestVerificationToken" &&
+        key !== "ResponseData"
+      ) {
+        if (key === __dateName) respObj[key] = dateText;
+        else if (key === __slotName) respObj[key] = String(slotId);
+        else respObj[key] = "";
+      }
     }
+  
     const respStr = JSON.stringify(respObj);
-
+  
+    // نحدّث input ResponseData في الصفحة
     const respEl = form.querySelector('input[name="ResponseData"]');
     if (respEl) respEl.value = respStr;
-
+  
+    // =====================================================
+    //  FormData الحقيقي اللي غادي يتبع للسيرفر
+    // =====================================================
+  
     const fd = new FormData();
-    const SPECIAL = new Set(["Data","ResponseData","AppointmentFor","SearchDate","Loc","__RequestVerificationToken"]);
-
+  
+    // نضيف جميع الحقول العادية (بدون ResponseData)
     controls.forEach(el => {
       const name = el.name;
-      if (!name || SPECIAL.has(name)) return;
+      if (!name) return;
+  
+      if (name === "ResponseData") return;
       fd.append(name, payloadObj[name] ?? "");
     });
-
-    if ("Data" in payloadObj) fd.append("Data", payloadObj.Data ?? "");
+  
+    // الحقول اللي خاصها تكون في POST:
     fd.append("ResponseData", respStr);
     fd.append("AppointmentFor", payloadObj.AppointmentFor ?? "");
-    fd.append("SearchDate",     payloadObj.SearchDate     ?? "");
-    fd.append("Loc",            payloadObj.Loc            ?? "");
+    fd.append("SearchDate", payloadObj.SearchDate ?? "");
+    fd.append("Loc", payloadObj.Loc ?? "");
     fd.append("__RequestVerificationToken", payloadObj.__RequestVerificationToken ?? "");
-
+  
     return fd;
   }
+
 
   const MAX_RETRIES_502 = 5;
 
@@ -1213,3 +1254,4 @@
   boot();
 
 })();
+
