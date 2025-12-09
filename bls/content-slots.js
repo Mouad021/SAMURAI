@@ -1137,7 +1137,7 @@
   }
 
   // =======================================================
-  // RACE: 3 GetAvailableSlotsByDate, نختار آخر واحد نجح بـ 200
+  // RACE: تجربة 3 أيام بالتسلسل (1s لكل واحد) ، أول واحد يجاوب هو الرابح
   // =======================================================
   function raceGetSlotsOnFirstDays(availDays, maxDays = 3, onWinnerReady) {
     if (!__tpl) return;
@@ -1146,57 +1146,52 @@
     const chosen = availDays.slice(0, maxDays);
     if (!chosen.length) return;
   
-    let pending = chosen.length;
-    const results = new Array(chosen.length);
+    const PER_TIMEOUT_MS   = 1000; // ثانية لكل طلب
+    const OVERALL_LIMIT_MS = 3000; // تقريباً 3 ثواني إجمالي
+  
     __raceWinnerReady = false;
   
-    chosen.forEach((d, idx) => {
-      if (!d || !d.DateText) {
-        pending--;
-        return;
-      }
+    (async () => {
+      const startTs = Date.now();
   
-      const dateText = d.DateText;
+      for (let idx = 0; idx < chosen.length; idx++) {
+        const d = chosen[idx];
+        if (!d || !d.DateText) continue;
   
-      fetchSlotsForDate(__tpl, dateText, undefined, true)
-        .then((j) => {
-          results[idx] = { ok: true, dateText, json: j };
-        })
-        .catch((err) => {
-          results[idx] = { ok: false, dateText, err };
-        })
-        .finally(() => {
-          pending--;
-          if (pending > 0) return; // مازال كاينين طلبات خدامين
+        // إذا تعدينا 3 ثواني من دخول الصفحة، نوقف
+        if (Date.now() - startTs > OVERALL_LIMIT_MS) {
+          console.warn("[CALENDRIA][DynSlots] race overall limit reached, stopping.");
+          break;
+        }
   
-          // هنا: الثلاثة سالاو، نختار "آخر واحد" ok من اللائحة
-          let winner = null;
-          for (let i = results.length - 1; i >= 0; i--) {
-            if (results[i] && results[i].ok) {
-              winner = results[i];
-              break;
-            }
-          }
+        const dateText = d.DateText;
+        const ctrl = new AbortController();
   
-          if (!winner) {
-            console.warn("[CALENDRIA][DynSlots] no successful race result");
-            return;
-          }
+        // تايمر 1s: إذا ماجاوبش السيرفر فهاذ المدة → abort و ندوز اليوم اللي بعدو
+        const t = setTimeout(() => {
+          try { ctrl.abort(); } catch {}
+        }, PER_TIMEOUT_MS);
   
-          const { dateText: winDate, json } = winner;
+        console.log("[CALENDRIA][DynSlots] race try day", idx, dateText);
   
+        try {
+          // طلب واحد فقط شغال هنا
+          const j = await fetchSlotsForDate(__tpl, dateText, ctrl.signal, true);
+          clearTimeout(t);
+  
+          // إذا وصل الرد قبل التايم آوت → هذا هو الرابح، نوقف اللوب
           __raceWinnerReady = true;
   
-          const url = __tpl.prefix + encodeURIComponent(winDate) + __tpl.suffix;
-          onAnyGetAvailableSlots(url, json);
+          const url = __tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix;
+          onAnyGetAvailableSlots(url, j);
   
-          // نخلي اليوم الفائز ظاهر في الـ UI
-          __lastRandomDayText = winDate;
-          if (__dateEl) __dateEl.value = winDate;
+          // تحديث اليوم في الـ UI
+          __lastRandomDayText = dateText;
+          if (__dateEl) __dateEl.value = dateText;
   
           const trigger = document.getElementById("__cal_date_trigger");
           const popup   = document.getElementById("__cal_days_popup");
-          if (trigger) trigger.textContent = winDate;
+          if (trigger) trigger.textContent = dateText;
   
           if (popup) {
             popup
@@ -1204,19 +1199,40 @@
               .forEach((btn) => {
                 const dt = btn.dataset.dateText;
                 if (!dt) return;
-                if (dt === winDate) btn.classList.add("cal-day-selected");
-                else                btn.classList.remove("cal-day-selected");
+                if (dt === dateText) btn.classList.add("cal-day-selected");
+                else                 btn.classList.remove("cal-day-selected");
               });
           }
   
-          showToast(`slots loaded for ${winDate}`, "info");
+          showToast(`slots loaded for ${dateText}`, "info");
   
           if (typeof onWinnerReady === "function") {
-            onWinnerReady(winDate);
+            onWinnerReady(dateText);
           }
-        });
-    });
+  
+          // مهم: نرجع هنا باش ما نمشيش لليوم 2 و 3
+          return;
+  
+        } catch (err) {
+          clearTimeout(t);
+  
+          // AbortError = التايمر قطع الطلب → عادي، ندوز لليوم اللي بعدو
+          if (err && err.name === "AbortError") {
+            console.warn("[CALENDRIA][DynSlots] race timeout for", dateText);
+            continue;
+          }
+  
+          console.warn("[CALENDRIA][DynSlots] race error for", dateText, err);
+          // حتى إذا كان خطأ آخر، نجرب اليوم اللي بعدو
+          continue;
+        }
+      }
+  
+      // إذا وصلنا هنا: ولا واحد من الثلاثة جاوب في الوقت المحدد
+      console.warn("[CALENDRIA][DynSlots] no race winner after trying all days.");
+    })();
   }
+
 
 
   // =======================================================
@@ -1256,4 +1272,5 @@
   boot();
 
 })();
+
 
