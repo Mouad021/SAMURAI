@@ -12,11 +12,11 @@
   // ==========================
   let AUTO_DELAY_MS = 0;
   let AUTO_ENABLED  = false;
-
-  // عدد الطلبات التلقائية (1 = طلب واحد فقط)
   let AUTO_REPEAT_COUNT = 1;
-  // الفاصل بين الطلبات الإضافية (بعد الأولى) بالميلي ثانية
   const REPEAT_GAP_MS = 1000;
+
+  // فلاغ: واش الرابح ديال GETAvailableSlots جاهز؟
+  let __raceWinnerReady = false;
 
   function loadDelaySnapshot() {
     try {
@@ -333,15 +333,20 @@
     return days[Math.floor(Math.random() * days.length)];
   }
 
-  async function fetchSlotsForDate(tpl, dateText, signal) {
+  async function fetchSlotsForDate(tpl, dateText, signal, isRace = false) {
+    const headers = {
+      "accept": "application/json, text/plain, */*",
+      "x-requested-with": "XMLHttpRequest",
+      "RequestVerificationToken": getToken()
+    };
+    if (isRace) {
+      headers["X-CAL-RACE"] = "1";
+    }
+
     const res = await fetch(tpl.prefix + encodeURIComponent(dateText) + tpl.suffix, {
       method: "POST",
       credentials: "include",
-      headers: {
-        "accept": "application/json, text/plain, */*",
-        "x-requested-with": "XMLHttpRequest",
-        "RequestVerificationToken": getToken()
-      },
+      headers,
       signal
     });
     return res.json();
@@ -446,8 +451,9 @@
     __slotsAbort = new AbortController();
 
     try {
-      const j = await fetchSlotsForDate(__tpl, dateText, __slotsAbort.signal);
+      const j = await fetchSlotsForDate(__tpl, dateText, __slotsAbort.signal, false);
       onAnyGetAvailableSlots(__tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix, j);
+      __raceWinnerReady = true; // إذا اختارها يدويًا، اعتبرها جاهزة للحجز
     } catch (e) {}
   }
 
@@ -572,14 +578,27 @@
   function installInterceptors() {
     const _fetch = window.fetch.bind(window);
 
-    window.fetch = async function (input, init) {
+    window.fetch = async function (input, init = {}) {
       let url = "";
       if (typeof input === "string") url = input;
       else if (input && input.url) url = input.url;
 
       const isGetSlots = /GetAvailableSlotsByDate/i.test(url || "");
 
-      if (isGetSlots) {
+      // نتحقق واش الطلب ديال السباق (X-CAL-RACE)
+      let isRace = false;
+      try {
+        const h = init && init.headers;
+        if (h) {
+          if (h instanceof Headers) {
+            isRace = !!h.get("X-CAL-RACE");
+          } else if (typeof h === "object") {
+            isRace = !!(h["X-CAL-RACE"] || h["x-cal-race"]);
+          }
+        }
+      } catch {}
+
+      if (isGetSlots && !isRace) {
         __toastSlotsWait = showToast("waiting for slot…", "info", { persistent: true });
       }
 
@@ -590,7 +609,7 @@
       }
 
       try {
-        if (isGetSlots) {
+        if (isGetSlots && !isRace) {
           const clone = res.clone();
           const ct = (clone.headers.get("content-type") || "").toLowerCase();
           if (ct.includes("application/json")) {
@@ -764,6 +783,12 @@
   // SUBMITS
   // =======================================================
   async function submitOneHour() {
+    // حماية: ما كنسمحش بأي POST SlotSelection حتى يكمل الرابح ديال GET
+    if (!__raceWinnerReady) {
+      showToast("wait slots race to finish", "limit");
+      return;
+    }
+
     const form = document.querySelector("form") || document.body;
     const dateText = __dateEl?.value || __lastRandomDayText;
     const slotId   = __selectedSlotId;
@@ -788,6 +813,11 @@
   }
 
   async function postAllOpenSlotsAuto() {
+    if (!__raceWinnerReady) {
+      showToast("wait slots race to finish", "limit");
+      return;
+    }
+
     const form = document.querySelector("form") || document.body;
     const dateText = __dateEl?.value || __lastRandomDayText;
     if (!dateText || !__lastOpenSlots.length) return;
@@ -849,6 +879,7 @@
 
     requestAnimationFrame(tick);
   }
+
   // =======================================================
   // TARGET TIMER (كل دقيقة في ثانية + ميلي ثانية محددة)
   // =======================================================
@@ -930,100 +961,100 @@
     document.getElementById("btnSubmit")?.remove();
   }
 
-    function injectButtons() {
-      const form = document.querySelector("form");
-      if (!form) return false;
-      if (document.getElementById("__cal_actions_bar")) return true;
-  
-      const bar = document.createElement("div");
-      bar.id = "__cal_actions_bar";
-      bar.className = "cal-actions-bar";
-  
-      const b1 = document.createElement("button");
-      b1.type = "button";
-      b1.className = "cal-submit-one";
-      b1.textContent = "SUBMIT";
-      b1.onclick = submitOneHour;
-  
-      const b2 = document.createElement("button");
-      b2.type = "button";
-      b2.className = "cal-submit-samurai";
-      b2.textContent = "SAMURAI SUBMIT";
-      b2.onclick = async () => {
-        if (SAMURAI_ALL_MODE) await samuraiSubmitAll();
-        else await submitOneHour();
-      };
-  
-      const bc = document.createElement("button");
-      bc.type = "button";
-      bc.className = "cal-countdown";
-  
-      if (AUTO_ENABLED) {
-        bc.textContent = (AUTO_DELAY_MS / 1000).toFixed(3) + "s";
-        bc.disabled = false;
-        bc.title = "Countdown before auto submit (from DynSlots delay)";
-      } else {
-        bc.textContent = "AUTO OFF";
-        bc.disabled = true;
-        bc.title = "Auto submit disabled (Delays master OFF أو value فارغة)";
-      }
-  
-      __countdownBtn = bc;
-  
-      bar.appendChild(b1);
-      bar.appendChild(b2);
-      bar.appendChild(bc);
-  
-      // ====== TARGET TIMER UI (second + ms) ======
-      const timerBox = document.createElement("div");
-      timerBox.className = "cal-timer-box";
-  
-      timerBox.innerHTML = `
-        <div class="cal-timer-row">
-          <label for="__cal_tgt_sec">sec</label>
-          <input id="__cal_tgt_sec" type="number" min="0" max="59" value="0" />
-          <label for="__cal_tgt_ms">ms</label>
-          <input id="__cal_tgt_ms" type="number" min="0" max="999" value="0" />
-          <button type="button" id="__cal_timer_start">START</button>
-          <button type="button" id="__cal_timer_stop">STOP</button>
-        </div>
-        <div class="cal-timer-countdown" id="__cal_timer_display">00.000s</div>
-      `;
-  
-      bar.appendChild(timerBox);
-      form.appendChild(bar);
-  
-      // events ديال التايمر
-      const secInput  = timerBox.querySelector("#__cal_tgt_sec");
-      const msInput   = timerBox.querySelector("#__cal_tgt_ms");
-      const startBtn  = timerBox.querySelector("#__cal_timer_start");
-      const stopBtn   = timerBox.querySelector("#__cal_timer_stop");
-  
-      startBtn.addEventListener("click", () => {
-        let sec = parseInt(secInput.value, 10);
-        let ms  = parseInt(msInput.value, 10);
-  
-        if (isNaN(sec) || sec < 0 || sec > 59) sec = 0;
-        if (isNaN(ms)  || ms < 0  || ms > 999) ms  = 0;
-  
-        secInput.value = String(sec);
-        msInput.value  = String(ms);
-  
-        // لازم تختار slot مرة واحدة قبل تشغيل التايمر
-        if (!__selectedSlotId) {
-          showToast("select slot first", "limit");
-          return;
-        }
-  
-        scheduleTargetTimer(sec, ms);
-      });
-  
-      stopBtn.addEventListener("click", () => {
-        stopTargetTimer();
-      });
-  
-      return true;
+  function injectButtons() {
+    const form = document.querySelector("form");
+    if (!form) return false;
+    if (document.getElementById("__cal_actions_bar")) return true;
+
+    const bar = document.createElement("div");
+    bar.id = "__cal_actions_bar";
+    bar.className = "cal-actions-bar";
+
+    const b1 = document.createElement("button");
+    b1.type = "button";
+    b1.className = "cal-submit-one";
+    b1.textContent = "SUBMIT";
+    b1.onclick = submitOneHour;
+
+    const b2 = document.createElement("button");
+    b2.type = "button";
+    b2.className = "cal-submit-samurai";
+    b2.textContent = "SAMURAI SUBMIT";
+    b2.onclick = async () => {
+      if (SAMURAI_ALL_MODE) await samuraiSubmitAll();
+      else await submitOneHour();
+    };
+
+    const bc = document.createElement("button");
+    bc.type = "button";
+    bc.className = "cal-countdown";
+
+    if (AUTO_ENABLED) {
+      bc.textContent = (AUTO_DELAY_MS / 1000).toFixed(3) + "s";
+      bc.disabled = false;
+      bc.title = "Countdown before auto submit (from DynSlots delay)";
+    } else {
+      bc.textContent = "AUTO OFF";
+      bc.disabled = true;
+      bc.title = "Auto submit disabled (Delays master OFF أو value فارغة)";
     }
+
+    __countdownBtn = bc;
+
+    bar.appendChild(b1);
+    bar.appendChild(b2);
+    bar.appendChild(bc);
+
+    // ====== TARGET TIMER UI (second + ms) ======
+    const timerBox = document.createElement("div");
+    timerBox.className = "cal-timer-box";
+
+    timerBox.innerHTML = `
+      <div class="cal-timer-row">
+        <label for="__cal_tgt_sec">sec</label>
+        <input id="__cal_tgt_sec" type="number" min="0" max="59" value="0" />
+        <label for="__cal_tgt_ms">ms</label>
+        <input id="__cal_tgt_ms" type="number" min="0" max="999" value="0" />
+        <button type="button" id="__cal_timer_start">START</button>
+        <button type="button" id="__cal_timer_stop">STOP</button>
+      </div>
+      <div class="cal-timer-countdown" id="__cal_timer_display">00.000s</div>
+    `;
+
+    bar.appendChild(timerBox);
+    form.appendChild(bar);
+
+    // events ديال التايمر
+    const secInput  = timerBox.querySelector("#__cal_tgt_sec");
+    const msInput   = timerBox.querySelector("#__cal_tgt_ms");
+    const startBtn  = timerBox.querySelector("#__cal_timer_start");
+    const stopBtn   = timerBox.querySelector("#__cal_timer_stop");
+
+    startBtn.addEventListener("click", () => {
+      let sec = parseInt(secInput.value, 10);
+      let ms  = parseInt(msInput.value, 10);
+
+      if (isNaN(sec) || sec < 0 || sec > 59) sec = 0;
+      if (isNaN(ms)  || ms < 0  || ms > 999) ms  = 0;
+
+      secInput.value = String(sec);
+      msInput.value  = String(ms);
+
+      // لازم تختار slot مرة واحدة قبل تشغيل التايمر
+      if (!__selectedSlotId) {
+        showToast("select slot first", "limit");
+        return;
+      }
+
+      scheduleTargetTimer(sec, ms);
+    });
+
+    stopBtn.addEventListener("click", () => {
+      stopTargetTimer();
+    });
+
+    return true;
+  }
 
   // =======================================================
   // SAMURAI MODE
@@ -1071,10 +1102,11 @@
 
     log("Auto sequence finished");
   }
+
   // =======================================================
-  // RACE: 3 GetAvailableSlotsByDate, keep first 200, abort rest
+  // RACE: 3 GetAvailableSlotsByDate, keep only winner
   // =======================================================
-  function raceGetSlotsOnFirstDays(availDays, maxDays = 3) {
+  function raceGetSlotsOnFirstDays(availDays, maxDays = 3, onWinnerReady) {
     if (!__tpl) return;
     if (!Array.isArray(availDays) || !availDays.length) return;
 
@@ -1091,23 +1123,24 @@
       const ctrl = new AbortController();
       controllers.push(ctrl);
 
-      fetchSlotsForDate(__tpl, dateText, ctrl.signal)
+      fetchSlotsForDate(__tpl, dateText, ctrl.signal, true)
         .then((j) => {
-          if (winnerChosen) return; // راه كاين واحد سبق
+          if (winnerChosen) return; // شي واحد سبق، ما ندير والو
           winnerChosen = true;
+          __raceWinnerReady = true; // دابا الرابح ديال GET جاهز
 
-          // أوقف بقية الطلبات اللي باقيين
+          // نكانسلو جميع الطلبات الآخرين
           controllers.forEach((c) => {
             if (c !== ctrl) {
               try { c.abort(); } catch {}
             }
           });
 
-          // مرّر النتيجة للمنطق العادي ديالنا
+          // مرّر النتيجة للمنطق العادي ديال السلوطات
           const url = __tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix;
           onAnyGetAvailableSlots(url, j);
 
-          // حدّث الواجهة: خلي اليوم اللي ربح هو المختار
+          // نخلي هاد اليوم هو اللي ظاهر فـ UI
           __lastRandomDayText = dateText;
           if (__dateEl) __dateEl.value = dateText;
 
@@ -1129,15 +1162,20 @@
           }
 
           showToast(`slots loaded for ${dateText}`, "info");
+
+          // من بعد ما الرابح يكمّل، نسمح لأي منطق إضافي (مثلاً AUTO)
+          if (typeof onWinnerReady === "function") {
+            onWinnerReady(dateText);
+          }
         })
         .catch((err) => {
-          // إذا كان فقط AbortError ما ندير والو
+          // AbortError عادي ما نطبع والو
           if (err && err.name === "AbortError") return;
           console.warn("[CALENDRIA][DynSlots] race request error for", dateText, err);
         });
     });
   }
- 
+
   // =======================================================
   // BOOT
   // =======================================================
@@ -1163,16 +1201,15 @@
     hideOriginalDateWidget();
     ensureDaysPicker(availDays);
 
-    // بدل randomDay: دابا غادي نرسل 3 طلبات على تواريخ مختلفة
-    raceGetSlotsOnFirstDays(availDays, 3);
-
-    if (AUTO_ENABLED) {
-      runAutoSequence().catch(e => warn("Auto sequence error", e));
-    }
+    // فاش ندخل الصفحة: ندير سباق بين 3 تواريخ
+    raceGetSlotsOnFirstDays(availDays, 3, () => {
+      // غير من بعد ما الرابح ديال GET يكمّل، نشغل AUTO إذا مفعّل
+      if (AUTO_ENABLED) {
+        runAutoSequence().catch(e => warn("Auto sequence error", e));
+      }
+    });
   }
 
   boot();
 
 })();
-
-
