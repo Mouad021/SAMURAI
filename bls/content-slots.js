@@ -443,30 +443,19 @@
     btn.classList.add("cal-day-selected");
     trigger.textContent = dateText;
     popup.classList.remove("open");
-  
+
     __lastRandomDayText = dateText;
     if (__dateEl) __dateEl.value = dateText;
-  
+
     try { __slotsAbort?.abort(); } catch {}
     __slotsAbort = new AbortController();
-  
+
     try {
       const j = await fetchSlotsForDate(__tpl, dateText, __slotsAbort.signal, false);
-  
-      const openSlots = parseOpenSlots(j);
-      if (!openSlots.length) {
-        __raceWinnerReady = false;
-        showToast("no open slots", "limit");
-        // باش الواجهة تبان فيها "No open slots for this day"
-        onAnyGetAvailableSlots(__tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix, j);
-        return;
-      }
-  
       onAnyGetAvailableSlots(__tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix, j);
-      __raceWinnerReady = true;
+      __raceWinnerReady = true; // إذا اختارها يدويًا، اعتبرها جاهزة للحجز
     } catch (e) {}
   }
-
 
   // =======================================================
   // HOURS BOX UI
@@ -552,232 +541,26 @@
 
     hideOriginalHoursDropdown();
   }
+
   // =======================================================
-  // KENDO DROPDOWN INJECTION (replace custom boxes)
+  // CENTRAL HOOK
   // =======================================================
-  function getKendoJQ() {
-    return (window.kendo && window.kendo.jQuery) ? window.kendo.jQuery : null;
-  }
-  
-  function getKendoSlotWidget() {
-    const jq = getKendoJQ();
-    if (!jq) return null;
-  
-    if (!__slotEl) __slotEl = getActiveSlotHiddenInputRaw();
-    if (!__slotEl) return null;
-  
-    try {
-      const $el = jq(__slotEl);
-      return (
-        $el.data("kendoDropDownList") ||
-        $el.data("kendoComboBox") ||
-        $el.data("kendoMultiColumnComboBox") ||
-        null
-      );
-    } catch {
-      return null;
-    }
-  }
-
-  
-  function injectSlotsIntoKendoDropdown(openSlots) {
-    const w = getKendoSlotWidget();
-    if (!w) {
-      warn("Kendo widget not found yet");
-      return false;
-    }
-  
-    // ✅ نحقنو غير المتاحين: Count > 0
-    const data = (openSlots || [])
-      .map(s => ({
-        Id: String(s.Id),
-        Name: String(s.Name || ""),
-        Count: Number(s.Count) || 0
-      }))
-      .filter(x => x.Count > 0);
-  
-    try {
-      const k = window.kendo;
-      if (!k || !k.template) {
-        warn("kendo.template missing");
-        return false;
-      }
-  
-      // ✅ كل العناصر خضراء + clickable (cursor:pointer)
-      const itemTpl = k.template(`
-        <div class="slot-item bg-success"
-             style="border-radius:8px;
-                    padding:4px 18px;
-                    cursor:pointer;
-                    color:white;">
-          #= Name #
-        </div>
-      `);
-  
-      // ✅ العرض ديال المختار في الهيدر
-      const valueTpl = k.template(`#= data && data.Name ? data.Name : '--Select--' #`);
-  
-      // ✅ تحديث options
-      if (typeof w.setOptions === "function") {
-        w.setOptions({
-          dataTextField: "Name",
-          dataValueField: "Id",
-          template: itemTpl,
-          valueTemplate: valueTpl
-        });
-      }
-  
-      // ✅ حط الداتا فـ DataSource
-      if (w.dataSource && typeof w.dataSource.data === "function") {
-        w.dataSource.data(data);
-      } else if (typeof w.setDataSource === "function" && k.data && k.data.DataSource) {
-        w.setDataSource(new k.data.DataSource({ data }));
-      }
-  
-      // ✅ refresh مضمونة
-      try {
-        if (w.listView && typeof w.listView.refresh === "function") w.listView.refresh();
-        if (typeof w._refresh === "function") w._refresh();
-        if (typeof w.refresh === "function") w.refresh();
-      } catch {}
-  
-      // ✅ فعّل widget إلا كان disabled
-      if (typeof w.enable === "function") w.enable(true);
-  
-      // ✅ ما نفرضوش auto-select (خليه --Select--)
-      __selectedSlotId = null;
-      if (typeof w.value === "function") w.value("");
-      if (typeof w.text === "function") w.text("--Select--");
-  
-      // ✅ hook change مرة وحدة
-      if (!w.__cal_hooked && typeof w.bind === "function") {
-        w.__cal_hooked = true;
-  
-        w.bind("change", () => {
-          const v = (typeof w.value === "function") ? w.value() : "";
-          __selectedSlotId = v ? String(v) : null;
-  
-          // باش الفورم يفهم التغيير
-          if (__slotEl) {
-            __slotEl.value = __selectedSlotId || "";
-            __slotEl.dispatchEvent(new Event("input", { bubbles: true }));
-            __slotEl.dispatchEvent(new Event("change", { bubbles: true }));
-          }
-        });
-  
-        // ✅ ملي كتفتح القائمة: نفرض refresh باش ما تبقاش خاوية
-        w.bind("open", () => {
-          try {
-            if (w.listView && typeof w.listView.refresh === "function") w.listView.refresh();
-            if (typeof w._refresh === "function") w._refresh();
-            if (typeof w.refresh === "function") w.refresh();
-          } catch {}
-        });
-      }
-  
-      return true;
-    } catch (e) {
-      warn("injectSlotsIntoKendoDropdown failed", e);
-      return false;
-    }
-  }
-
-
-  function injectSlotsIntoOpenedKendoList(openSlots) {
-    if (!openSlots || !openSlots.length) return false;
-  
-    // كنجبد آخر popup مفتوح (ديال Appointment Slot)
-    const popups = Array.from(document.querySelectorAll(".k-animation-container .k-list-container.k-popup"));
-    const popup = popups.find(p => p.querySelector(".k-list-scroller ul.k-list[id$='_listbox']"));
-    if (!popup) return false;
-  
-    const ul = popup.querySelector(".k-list-scroller ul.k-list[id$='_listbox']");
-    if (!ul) return false;
-  
-    // hide "No data found"
-    const nodata = popup.querySelector(".k-nodata");
-    if (nodata) nodata.style.display = "none";
-  
-    ul.innerHTML = "";
-  
-    openSlots.forEach((slot, idx) => {
-      const li = document.createElement("li");
-      li.className = "k-item";
-      li.setAttribute("role", "option");
-      li.setAttribute("tabindex", "-1");
-      li.dataset.offsetIndex = String(idx);
-      li.setAttribute("aria-selected", "false");
-  
-      const div = document.createElement("div");
-      const cls = slot.Count >= 5 ? "bg-success" : "bg-warning";
-      div.className = "slot-item " + cls;
-
-      div.className = "slot-item bg-danger";
-      div.style.cssText = "border-radius:8px;padding:4px 18px;cursor:pointer;color:white;";
-      div.textContent = slot.Name;
-  
-      li.appendChild(div);
-  
-      li.addEventListener("click", () => {
-        ul.querySelectorAll(".k-item").forEach(x => {
-          x.classList.remove("k-state-selected", "k-state-focused");
-          x.setAttribute("aria-selected", "false");
-        });
-  
-        li.classList.add("k-state-selected", "k-state-focused");
-        li.setAttribute("aria-selected", "true");
-  
-        __selectedSlotId = String(slot.Id);
-  
-        if (__slotEl) {
-          __slotEl.value = __selectedSlotId;
-          __slotEl.dispatchEvent(new Event("input", { bubbles: true }));
-          __slotEl.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-  
-        // إذا كاين widget خليه يتزامن
-        const w = getKendoSlotWidget();
-        try { if (w && typeof w.value === "function") w.value(__selectedSlotId); } catch {}
-      });
-  
-      ul.appendChild(li);
-    });
-  
-    return true;
-  }
-  
-  function hookKendoOpenForSlotsOnce() {
-    const w = getKendoSlotWidget();
-    if (!w || w.__cal_open_hooked) return;
-    w.__cal_open_hooked = true;
-  
-    if (typeof w.bind === "function") {
-      w.bind("open", () => {
-        setTimeout(() => {
-          injectSlotsIntoOpenedKendoList(__lastOpenSlots);
-        }, 0);
-      });
-    }
-  }
-
   function onAnyGetAvailableSlots(url, json) {
     if (__toastSlotsWait) {
       hideToast(__toastSlotsWait);
       __toastSlotsWait = null;
     }
-  
+
     const dateText =
       extractAppointmentDateFromUrl(url) ||
       (__dateEl?.value || __lastRandomDayText);
-  
-    const openSlots = parseOpenSlots(json).filter(s => Number(s.Count) > 1);
-  
+    const openSlots = parseOpenSlots(json);
+
     __lastOpenSlots = openSlots;
     __lastRandomDayText = dateText;
-  
-    // ✅ هنا التغيير المهم
-    injectSlotsIntoKendoDropdown(openSlots);
-    hookKendoOpenForSlotsOnce();
+
+    renderSlotBoxes(openSlots);
+
     try {
       chrome.runtime.sendMessage(
         {
@@ -788,7 +571,6 @@
       );
     } catch {}
   }
-
 
   // =======================================================
   // INTERCEPTORS
@@ -1399,14 +1181,8 @@
             continue;
           }
   
-          const openSlots = parseOpenSlots(j);
-          if (!openSlots.length) {
-            console.warn("[CALENDRIA][DynSlots] last GET answered but no open slots -> keep locked");
-            __raceWinnerReady = false;
-            showToast("no open slots (last GET)", "limit");
-            return;
-          }
-
+          // === هنا وصلنا للأخير و جاوب ===
+          // هو اللي كنعتابرو "الرابح" وكنفتح القفل
           const url = __tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix;
   
           __raceWinnerReady = true;
@@ -1440,26 +1216,18 @@
   
           console.warn("[CALENDRIA][DynSlots] error for", dateText, err);
   
+          // إذا كان الأخير وفشل: نستعمل backup إذا كان موجود
           if (isLast && backup) {
             const bDate = backup.dateText;
             const bJson = backup.json;
-          
-            const openSlotsB = parseOpenSlots(bJson);
-            if (!openSlotsB.length) {
-              console.warn("[CALENDRIA][DynSlots] backup has no open slots -> keep locked");
-              __raceWinnerReady = false;
-              showToast("no open slots (backup)", "limit");
-              return;
-            }
-          
             const url = __tpl.prefix + encodeURIComponent(bDate) + __tpl.suffix;
-          
+  
             __raceWinnerReady = true;
             onAnyGetAvailableSlots(url, bJson);
-          
+  
             __lastRandomDayText = bDate;
             if (__dateEl) __dateEl.value = bDate;
-          
+  
             const trigger = document.getElementById("__cal_date_trigger");
             const popup   = document.getElementById("__cal_days_popup");
             if (trigger) trigger.textContent = bDate;
@@ -1470,12 +1238,11 @@
                 btn.classList.toggle("cal-day-selected", dt === bDate);
               });
             }
-          
+  
             showToast(`slots loaded for ${bDate} (backup)`, "info");
             if (typeof onWinnerReady === "function") onWinnerReady(bDate);
             return;
           }
-
   
           continue;
         }
@@ -1540,22 +1307,22 @@
     }
   }
   
+  // نراقبو تغييرات لوكال (storage event كيخدم ملي كتبدّل من نفس الصفحة؟ لا)
+  // لذلك كنزيدو polling خفيف
   function startSamuraiTimesWatcher() {
-    if (window.__cal_samurai_times_watcher) return;
-    window.__cal_samurai_times_watcher = true;
-  
     let lastB = null, lastA = null;
   
-    setInterval(() => {
+    const tick = () => {
       const { before, after } = readSamuraiTimes();
       if (before !== lastB || after !== lastA) {
         lastB = before;
         lastA = after;
         updateSamuraiTimesBox();
       }
-    }, 250);
+      requestAnimationFrame(tick);
+    };
+    tick();
   }
-
   // =======================================================
   // BOOT
   // =======================================================
@@ -1570,8 +1337,7 @@
     if (!ok) return setTimeout(boot, 200);
     
     await ensureStableNamesReady();
-    hookKendoOpenForSlotsOnce();
-
+    
     updateSamuraiTimesBox();
     startSamuraiTimesWatcher();
     
@@ -1597,10 +1363,6 @@
   boot();
 
 })();
-
-
-
-
 
 
 
