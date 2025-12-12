@@ -1,10 +1,10 @@
 /* ============================
-   SAMURAI CALENDRIA – CLEAN
+   SAMURAI CALENDRIA – LIGHT THEME ONLY
    SlotSelection page
    ============================ */
 
 /* ----------------------------
-   Global page skin
+   Global page skin (فقط SlotSelection)
    ---------------------------- */
 
 html,
@@ -14,7 +14,7 @@ body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-/* نخلي الفورم فالنص */
+/* نخلي الكونتينر ديال الفورم فالنص بحال كارد مستقل */
 main .row.justify-content-center > .col-12,
 main .row.p-4.justify-content-center > .col-12 {
   max-width: 520px;
@@ -22,69 +22,283 @@ main .row.p-4.justify-content-center > .col-12 {
   margin-right: auto !important;
 }
 
-/* ----------------------------
-   IMPORTANT
-   نخلي Date + Slot الأصليين
-   ---------------------------- */
-
-/* نلغي أي محاولة لإخفاء kendo widgets */
-.cal-hidden-date-widget,
-.cal-hidden-slot-dropdown {
-  display: block !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-  height: auto !important;
+main .row.justify-content-center,
+main .row.p-4.justify-content-center {
+  justify-content: center !important;
 }
 
-/* نخبي UI ديال الأيام والساعات ديالنا نهائيا */
-#__cal_days_card,
-#__cal_days_popup,
-#__cal_slots_boxes {
+main .row.p-4.justify-content-center > .col-12.pb-2,
+main .row.justify-content-center > .col-12.pb-2 {
+  padding-top: 20px;
+}
+
+/* العنوان */
+main h5,
+main .card-header h5 {
+  font-weight: 700;
+  color: #111827;
+}
+
+/* نخفي الويجتات الأصلية ديال الكندو باش يبقى غير ديالنا */
+.cal-hidden-date-widget,
+.cal-hidden-slot-dropdown {
   display: none !important;
 }
 
-/* ============================
-   SAMURAI TIMES (LIGHT ONLY)
-   ============================ */
+/* ----------------------------
+   Card wrapper (الكارت الرئيسي)
+   ---------------------------- */
 
-.cal-samurai-times {
-  all: unset;
-  display: block;
-  margin: 6px 0 10px 0;
+.cal-card {
+  background: #ffffff;
+  border-radius: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  box-shadow:
+    0 12px 30px rgba(148, 163, 184, 0.35),
+    0 0 0 1px rgba(229, 231, 235, 0.9);
+  padding: 16px 16px 14px;
 }
 
-.cal-samurai-row {
+/* ----------------------------
+   Date picker bar
+   ---------------------------- */
+
+.cal-date-bar {
+  padding: 6px 6px 8px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 4px 0;
+  gap: 8px;
 }
 
-.cal-samurai-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #6b7280;
-  min-width: 72px;
-}
-
-.cal-samurai-value {
-  font-size: 12px;
-  font-weight: 700;
+/* الزر اللي كيبان فيه التاريخ المختار */
+.cal-date-trigger {
+  flex: 1;
+  height: 42px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.85);
+  background: #ffffff;
   color: #111827;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: #f3f4f6;
-  border: 1px solid #e5e7eb;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: .2px;
+  text-align: left;
+  padding: 0 14px;
+  transition:
+    border-color .14s ease,
+    box-shadow .14s ease,
+    background-color .14s ease,
+    transform .12s ease;
 }
 
-/* نلغي أي أنيميشن */
-.cal-samurai-pulse {
-  animation: none !important;
+.cal-date-trigger:hover {
+  border-color: #38bdf8;
+  background: #e5f3ff;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35);
+  transform: translateY(-1px);
 }
 
-/* ============================
-   ACTIONS BAR
-   ============================ */
+/* زر الآيكون ديال الكالاندر */
+.cal-date-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 1px solid rgba(56, 189, 248, 0.7);
+  background: linear-gradient(135deg, #0ea5e9, #38bdf8);
+  display: grid;
+  place-items: center;
+  color: #0b1120;
+  font-size: 18px;
+  box-shadow: 0 8px 18px rgba(56, 189, 248, 0.65);
+  transition: transform .12s ease, filter .12s ease;
+}
+
+.cal-date-icon:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
+
+/* زر Refresh للأيام */
+.cal-date-refresh {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.7);
+  background: #ffffff;
+  color: #111827;
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  margin-left: 4px;
+  transition:
+    border-color .14s ease,
+    box-shadow .14s ease,
+    background-color .14s ease,
+    transform .12s ease;
+}
+
+.cal-date-refresh:hover {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.4);
+  transform: translateY(-1px);
+}
+
+/* ----------------------------
+   Days popup
+   ---------------------------- */
+
+.cal-days-popup {
+  margin: 4px 2px 8px;
+  padding: 8px;
+  display: none;
+  background: #ffffff;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  border-radius: 16px;
+  box-shadow: 0 14px 30px rgba(148, 163, 184, 0.55);
+}
+
+.cal-days-popup.open {
+  display: block;
+}
+
+.cal-days-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Day buttons */
+.cal-day-btn {
+  min-width: 110px;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 13px;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  background: #ffffff;
+  color: #111827;
+  transition:
+    transform .1s ease,
+    box-shadow .1s ease,
+    border-color .1s ease,
+    background-color .1s ease,
+    color .1s ease;
+}
+
+.cal-day-btn:hover {
+  transform: translateY(-1px);
+  border-color: #38bdf8;
+  box-shadow: 0 3px 12px rgba(148, 163, 184, 0.6);
+}
+
+/* Available days */
+.cal-day-avail {
+  background: #ecfeff;
+  color: #115e59;
+  border-color: rgba(45, 212, 191, 0.6);
+}
+
+/* Unavailable days */
+.cal-day-unavail {
+  background: #e5e7eb;
+  color: #6b7280;
+  text-decoration: line-through;
+  opacity: .7;
+  pointer-events: none;
+}
+
+/* Selected day */
+.cal-day-selected {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.7);
+  background: #e0f2fe;
+}
+
+/* ----------------------------
+   Slots container + message
+   ---------------------------- */
+
+.cal-slots-container {
+  margin: 10px 0 0;
+  padding: 4px 2px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* الرسالة لا توجد Slots */
+.cal-no-slots-msg {
+  font-weight: 600;
+  color: #4b5563;
+}
+
+/* Slot buttons */
+.cal-slot-btn {
+  /* باش يبانو ديما جوج فالسطر (أو أكثر) فالشاشة العريضة */
+  flex: 1 1 calc(50% - 8px);
+  max-width: calc(50% - 8px);
+  box-sizing: border-box;
+
+  min-width: 150px;
+  height: 50px;
+  border-radius: 16px;
+  font-weight: 600;
+  font-size: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.7);
+  background: #ffffff;
+  color: #111827;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  line-height: 1.15;
+  transition:
+    transform .1s ease,
+    box-shadow .1s ease,
+    border-color .1s ease,
+    background-color .1s ease,
+    color .1s ease;
+}
+
+.cal-slot-btn:hover {
+  transform: translateY(-1px);
+  border-color: #38bdf8;
+  box-shadow: 0 4px 14px rgba(148, 163, 184, 0.65);
+}
+
+/* على الشاشات الصغيرة خليه بوكس واحد فالسطر */
+@media (max-width: 480px) {
+  .cal-slot-btn {
+    flex-basis: 100%;
+    max-width: 100%;
+  }
+}
+
+/* Count > 1 – أخضر ناعم */
+.cal-slot-green {
+  background: #bbf7d0;
+  border-color: #22c55e;
+  color: #14532d;
+}
+
+/* Count == 1 – أحمر ناعم */
+.cal-slot-red {
+  background: #fee2e2;
+  border-color: #f97373;
+  color: #7f1d1d;
+}
+
+/* Selected slot */
+.cal-slot-selected {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.8);
+  background: #dbeafe;
+}
+
+/* ----------------------------
+   Actions bar (SUBMIT / SAMURAI / Countdown)
+   ---------------------------- */
 
 .cal-actions-bar {
   margin-top: 14px;
@@ -95,6 +309,7 @@ main .row.p-4.justify-content-center > .col-12 {
   flex-wrap: wrap;
 }
 
+/* Base style */
 .cal-submit-one,
 .cal-submit-samurai,
 .cal-countdown {
@@ -107,30 +322,52 @@ main .row.p-4.justify-content-center > .col-12 {
   transition:
     transform .1s ease,
     box-shadow .1s ease,
-    filter .1s ease;
+    filter .1s ease,
+    background-color .1s ease,
+    border-color .1s ease,
+    color .1s ease;
 }
 
-/* SUBMIT */
+/* SUBMIT (ساعة واحدة) */
 .cal-submit-one {
   background: linear-gradient(135deg, #0ea5e9, #38bdf8);
   color: #0b1120;
+  border-color: rgba(56, 189, 248, 0.9);
   box-shadow: 0 10px 24px rgba(56, 189, 248, 0.55);
 }
 
-/* SAMURAI */
+.cal-submit-one:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+}
+
+/* SAMURAI SUBMIT */
 .cal-submit-samurai {
   background: linear-gradient(135deg, #ef4444, #f97373);
   color: #0b1120;
+  border-color: rgba(248, 113, 113, 0.9);
   box-shadow: 0 10px 24px rgba(248, 113, 113, 0.55);
 }
 
-/* Countdown */
+.cal-submit-samurai:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+}
+
+/* Countdown neutral pill */
 .cal-countdown {
   background: #e5e7eb;
   color: #111827;
+  border-color: rgba(148, 163, 184, 0.6);
+  cursor: pointer;
+  opacity: .95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-width: 120px;
 }
 
+/* شكل الـ countdown فحالة OFF / disabled */
 .cal-countdown[disabled] {
   opacity: .6;
   cursor: default;
@@ -138,7 +375,75 @@ main .row.p-4.justify-content-center > .col-12 {
 }
 
 /* ============================
-   TARGET TIMER
+   TOASTS (إشعارات جانبية)
+   ============================ */
+
+.cal-toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 9999;
+}
+
+.cal-toast {
+  min-width: 220px;
+  max-width: 320px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.28);
+  border: 1px solid rgba(148, 163, 184, 0.8);
+  color: #111827;
+  background: #e5e7eb;
+  opacity: 0;
+  transform: translateX(16px);
+  animation: cal-toast-in 0.14s ease-out forwards;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* أنواع الألوان */
+.cal-toast-info {
+  background: #e0f2fe;
+  border-color: #38bdf8;
+  color: #075985;
+}
+
+.cal-toast-pending {
+  background: #ffedd5;
+  border-color: #fb923c;
+  color: #9a3412;
+}
+
+.cal-toast-success {
+  background: #dcfce7;
+  border-color: #22c55e;
+  color: #166534;
+}
+
+.cal-toast-reserved {
+  background: #fee2e2;
+  border-color: #ef4444;
+  color: #7f1d1d;
+}
+
+.cal-toast-limit {
+  background: #f5f3ff;
+  border-color: #a855f7;
+  color: #4c1d95;
+}
+
+/* أنيميشن خروج */
+.cal-toast-hide {
+  animation: cal-toast-out 0.16s ease-in forwards;
+}
+/* ============================
+   TARGET TIMER (second + ms)
    ============================ */
 
 .cal-timer-box {
@@ -183,6 +488,12 @@ main .row.p-4.justify-content-center > .col-12 {
   font-weight: 600;
   padding: 0 12px;
   cursor: pointer;
+  transition: background-color .12s ease, transform .1s ease;
+}
+
+.cal-timer-row button:hover {
+  background: #e5f3ff;
+  transform: translateY(-1px);
 }
 
 .cal-timer-countdown {
@@ -192,83 +503,29 @@ main .row.p-4.justify-content-center > .col-12 {
   font-weight: 800;
   font-size: 22px;
   letter-spacing: 1px;
+  padding: 4px 0;
   color: #111827;
-}
-
-/* ============================
-   TOASTS
-   (نفس الملف ديالك – بلا تغيير)
-   ============================ */
-
-.cal-toast-container {
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  z-index: 9999;
-}
-
-.cal-toast {
-  min-width: 220px;
-  max-width: 320px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 600;
-  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.28);
-  border: 1px solid rgba(148, 163, 184, 0.8);
-  color: #111827;
-  background: #e5e7eb;
-  opacity: 0;
-  transform: translateX(16px);
-  animation: cal-toast-in 0.14s ease-out forwards;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.cal-toast-info {
-  background: #e0f2fe;
-  border-color: #38bdf8;
-  color: #075985;
-}
-
-.cal-toast-pending {
-  background: #ffedd5;
-  border-color: #fb923c;
-  color: #9a3412;
-}
-
-.cal-toast-success {
-  background: #dcfce7;
-  border-color: #22c55e;
-  color: #166534;
-}
-
-.cal-toast-reserved {
-  background: #fee2e2;
-  border-color: #ef4444;
-  color: #7f1d1d;
-}
-
-.cal-toast-limit {
-  background: #f5f3ff;
-  border-color: #a855f7;
-  color: #4c1d95;
-}
-
-.cal-toast-hide {
-  animation: cal-toast-out 0.16s ease-in forwards;
 }
 
 @keyframes cal-toast-in {
-  from { opacity: 0; transform: translateX(18px); }
-  to   { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 @keyframes cal-toast-out {
-  from { opacity: 1; transform: translateX(0); }
-  to   { opacity: 0; transform: translateX(18px); }
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(18px);
+  }
 }
+
