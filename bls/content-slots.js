@@ -577,47 +577,45 @@
   function injectSlotsIntoKendoDropdown(openSlots) {
     const ddl = getKendoSlotDDL();
     if (!ddl) {
-      warn("Kendo DropDownList not found yet");
+      setTimeout(() => injectSlotsIntoKendoDropdown(openSlots), 150);
       return false;
     }
   
-    // كنخلي غير slots المفتوحة
     const data = (openSlots || []).map(s => ({
       Id: String(s.Id),
       Name: String(s.Name || ""),
-      Count: Number(s.Count) || 0
     }));
   
-    // بدّل الداتا فالدروبداون
     try {
-      // تأكد fields
-      ddl.setOptions({ dataTextField: "Name", dataValueField: "Id" });
+      // 🔴 مهم: نفرض settings قبل datasource
+      ddl.setOptions({
+        dataTextField: "Name",
+        dataValueField: "Id",
+        valuePrimitive: true,   // 🔥 هذا هو المفتاح
+        optionLabel: ""         // نحيّدو optionLabel
+      });
   
-      // DataSource جديدة
-      const jq = getKendoJQ();
-      const ds = new window.kendo.data.DataSource({ data });
+      const ds = new kendo.data.DataSource({ data });
       ddl.setDataSource(ds);
-      ddl.refresh();
   
-      // auto-select أول واحد إذا كاين
+      // 🔴 نعمل refresh حقيقي
+      ddl._refresh();
+  
       if (data.length) {
-        ddl.value(data[0].Id);
-        ddl.trigger("change");
-  
-        __selectedSlotId = data[0].Id; // نخليوه متزامن
+        // 🔥 select بدل value
+        ddl.select(0);
+        __selectedSlotId = data[0].Id;
       } else {
-        ddl.value(""); // empty
+        ddl.select(-1);
         __selectedSlotId = null;
       }
   
-      // تراقب تغييرات المستخدم
       if (!ddl.__cal_hooked) {
         ddl.__cal_hooked = true;
         ddl.bind("change", () => {
-          const v = ddl.value();
-          __selectedSlotId = v ? String(v) : null;
+          const item = ddl.dataItem();
+          __selectedSlotId = item ? String(item.Id) : null;
   
-          // باش الفورم يفهم التغيير
           if (__slotEl) {
             __slotEl.value = __selectedSlotId || "";
             __slotEl.dispatchEvent(new Event("input", { bubbles: true }));
@@ -628,10 +626,11 @@
   
       return true;
     } catch (e) {
-      warn("injectSlotsIntoKendoDropdown failed", e);
+      console.warn("injectSlotsIntoKendoDropdown failed", e);
       return false;
     }
   }
+
 
   function onAnyGetAvailableSlots(url, json) {
     if (__toastSlotsWait) {
@@ -1469,3 +1468,4 @@
   boot();
 
 })();
+
