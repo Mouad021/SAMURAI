@@ -203,34 +203,48 @@
     } catch {}
   }
 
-  // =========================
-  // 8) Build DS + SetOptions (باش اللائحة كلها تبان فيها count)
-  // =========================
   function buildAndSetDS(ddl, itemsWithDisplay) {
+    // نخلي جميع العناصر (إذا كنت كتحذف 0 فـ normalizeSlots غيبقاو غير المتاحين => كلهم خضر)
     const dataForDS = itemsWithDisplay.map(x => ({
       ...x,
-      Name: x.__DisplayName
+      Name: x.__DisplayName,
+      __rawName: x.Name,           // احتياط
+      __count: Number(x.Count) || 0
     }));
-
+  
     STATE.augmentedItems = itemsWithDisplay;
-    STATE.ds = new window.kendo.data.DataSource({ data: dataForDS });
-
-    // ✅ مهم: نخلي window.slotDataSource نفس الـ DS (لأي منطق open فالموقع)
-    try { window.slotDataSource = STATE.ds; } catch {}
-
-    // ✅ خلّي Kendo يعرف كيفاش يعرض Name (اللي فيه count) فـ input و فـ li
+  
+    // ✅ template فيه bg-success / bg-danger باش يرجعو الألوان
+    // إذا كنت حادف Count=0 => كلهم bg-success
+    const itemTpl  = `<div class="slot-item #= (__count>0 ? 'bg-success' : 'bg-danger') #"
+                       style="border-radius:8px;padding:4px 18px 4px 28px;cursor:pointer;color:white;">
+                       #= Name #
+                     </div>`;
+    const valueTpl = `<span>#= Name #</span>`;
+  
     try {
       ddl.setOptions({
         dataTextField: "Name",
         dataValueField: "Id",
-        valueTemplate: `<span>#= data.Name #</span>`,
-        template: `<div class="slot-item">#= data.Name #</div>`
+        template: itemTpl,
+        valueTemplate: valueTpl
       });
     } catch {}
-
-    ddl.setDataSource(STATE.ds);
-    ddl.refresh();
+  
+    // ✅ Performance: ما تعاودش تنشئ DataSource كل مرة
+    if (!STATE.ds) {
+      STATE.ds = new window.kendo.data.DataSource({ data: dataForDS });
+      try { window.slotDataSource = STATE.ds; } catch {}
+      ddl.setDataSource(STATE.ds);
+      ddl.refresh();
+    } else {
+      // تحديث سريع بلا rebind
+      STATE.ds.data(dataForDS);
+      // refresh خفيف مرة وحدة فقط
+      ddl.refresh();
+    }
   }
+
 
   function selectBestAndLock(ddl) {
     const items = STATE.augmentedItems;
@@ -463,3 +477,4 @@
   })().catch(e => warn("Fatal", e));
 
 })();
+
