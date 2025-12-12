@@ -1136,9 +1136,6 @@
     log("Auto sequence finished");
   }
 
-  // =======================================================
-  // RACE: تجربة 3 أيام بالتسلسل (1s لكل واحد) ، أول واحد يجاوب هو الرابح
-  // =======================================================
   function raceGetSlotsOnFirstDays(availDays, maxDays = 3, onWinnerReady) {
     if (!__tpl) return;
     if (!Array.isArray(availDays) || !availDays.length) return;
@@ -1146,8 +1143,8 @@
     const chosen = availDays.slice(0, maxDays);
     if (!chosen.length) return;
   
-    const PER_TIMEOUT_MS   = 1000; // ثانية لكل طلب
-    const OVERALL_LIMIT_MS = 3000; // تقريباً 3 ثواني إجمالي
+    const PER_TIMEOUT_MS   = 1000; // 1s للأولين فقط
+    const OVERALL_LIMIT_MS = 3000; // 3s إجمالي قبل ما نبداو الأخير
   
     __raceWinnerReady = false;
   
@@ -1158,28 +1155,33 @@
         const d = chosen[idx];
         if (!d || !d.DateText) continue;
   
-        // إذا تعدينا 3 ثواني من دخول الصفحة، نوقف
-        if (Date.now() - startTs > OVERALL_LIMIT_MS) {
-          console.warn("[CALENDRIA][DynSlots] race overall limit reached, stopping.");
+        const dateText = d.DateText;
+        const isLast = (idx === chosen.length - 1);
+  
+        // قبل ما نوصلو للأخير: نحترمو limit ديال 3 ثواني
+        // ولكن فالأخير: ماكانوقفوش حتى يجاوب
+        if (!isLast && (Date.now() - startTs > OVERALL_LIMIT_MS)) {
+          console.warn("[CALENDRIA][DynSlots] race overall limit reached before last, stopping early.");
           break;
         }
   
-        const dateText = d.DateText;
         const ctrl = new AbortController();
   
-        // تايمر 1s: إذا ماجاوبش السيرفر فهاذ المدة → abort و ندوز اليوم اللي بعدو
-        const t = setTimeout(() => {
-          try { ctrl.abort(); } catch {}
-        }, PER_TIMEOUT_MS);
+        // timeout غير للأولين
+        let t = null;
+        if (!isLast) {
+          t = setTimeout(() => {
+            try { ctrl.abort(); } catch {}
+          }, PER_TIMEOUT_MS);
+        }
   
-        console.log("[CALENDRIA][DynSlots] race try day", idx, dateText);
+        console.log("[CALENDRIA][DynSlots] race try day", idx, dateText, isLast ? "(LAST: no-abort)" : "");
   
         try {
-          // طلب واحد فقط شغال هنا
           const j = await fetchSlotsForDate(__tpl, dateText, ctrl.signal, true);
-          clearTimeout(t);
+          if (t) clearTimeout(t);
   
-          // إذا وصل الرد قبل التايم آوت → هذا هو الرابح، نوقف اللوب
+          // هذا هو الرابح
           __raceWinnerReady = true;
   
           const url = __tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix;
@@ -1194,44 +1196,38 @@
           if (trigger) trigger.textContent = dateText;
   
           if (popup) {
-            popup
-              .querySelectorAll(".cal-day-btn")
-              .forEach((btn) => {
-                const dt = btn.dataset.dateText;
-                if (!dt) return;
-                if (dt === dateText) btn.classList.add("cal-day-selected");
-                else                 btn.classList.remove("cal-day-selected");
-              });
+            popup.querySelectorAll(".cal-day-btn").forEach((btn) => {
+              const dt = btn.dataset.dateText;
+              if (!dt) return;
+              if (dt === dateText) btn.classList.add("cal-day-selected");
+              else                 btn.classList.remove("cal-day-selected");
+            });
           }
   
           showToast(`slots loaded for ${dateText}`, "info");
   
-          if (typeof onWinnerReady === "function") {
-            onWinnerReady(dateText);
-          }
+          if (typeof onWinnerReady === "function") onWinnerReady(dateText);
   
-          // مهم: نرجع هنا باش ما نمشيش لليوم 2 و 3
-          return;
-  
+          return; // مهم: نحبسو هنا باش مانمشيوش لليوم اللي بعدو
         } catch (err) {
-          clearTimeout(t);
+          if (t) clearTimeout(t);
   
-          // AbortError = التايمر قطع الطلب → عادي، ندوز لليوم اللي بعدو
           if (err && err.name === "AbortError") {
             console.warn("[CALENDRIA][DynSlots] race timeout for", dateText);
             continue;
           }
   
           console.warn("[CALENDRIA][DynSlots] race error for", dateText, err);
-          // حتى إذا كان خطأ آخر، نجرب اليوم اللي بعدو
+  
+          // إلا كان الأخير ووقع error (ماشي Abort) نقدر نخليه يرجّع/يكمّل حسب بغيتي
           continue;
         }
       }
   
-      // إذا وصلنا هنا: ولا واحد من الثلاثة جاوب في الوقت المحدد
       console.warn("[CALENDRIA][DynSlots] no race winner after trying all days.");
     })();
   }
+
 
 
 
@@ -1272,5 +1268,6 @@
   boot();
 
 })();
+
 
 
