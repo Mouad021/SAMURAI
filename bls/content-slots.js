@@ -536,6 +536,14 @@
 
     hideOriginalHoursDropdown();
   }
+  // ✅ إذا كان الوقت ديال الإرسال جا وكنا كنستناو الساعات
+  if (__autoWaitingForSlots && openSlots && openSlots.length > 0) {
+    __autoWaitingForSlots = false;
+    if (!__autoStarted && AUTO_ENABLED && __autoCountdownDone && __raceWinnerReady) {
+      __autoStarted = true;
+      runAutoSequence(true).catch(e => warn("Auto sequence error", e));
+    }
+  }
 
   // =======================================================
   // CENTRAL HOOK
@@ -867,6 +875,7 @@
   // =======================================================
   let __autoCountdownDone = false;
   let __autoStarted = false;
+  let __autoWaitingMode = "single";
 
   function updateCountdownButtonText(leftMs) {
     if (!__countdownBtn) return;
@@ -901,15 +910,23 @@
   }
 
   function tryStartAutoIfReady() {
-    // ✅ ما نبداو auto حتى: (1) العداد سالا، (2) race واجد، (3) ما بداش من قبل
     if (__autoStarted) return;
     if (!AUTO_ENABLED) return;
     if (!__autoCountdownDone) return;
     if (!__raceWinnerReady) return;
-
+  
+    // ✅ الشرط الجديد: ما نرسلوش SlotSelection POST حتى تكون الساعات جاهزين
+    const hasSlots = Array.isArray(__lastOpenSlots) && __lastOpenSlots.length > 0;
+    if (!hasSlots) {
+      __autoWaitingForSlots = true;
+      __autoWaitingMode = SAMURAI_ALL_MODE ? "all" : "single";
+      return; // نستناو حتى يبانوا الساعات، ومن بعد نطلقو auto مباشرة
+    }
+  
     __autoStarted = true;
-    runAutoSequence(/*skipFirstDelay*/ true).catch(e => warn("Auto sequence error", e));
+    runAutoSequence(true).catch(e => warn("Auto sequence error", e));
   }
+
 
   // =======================================================
   // TARGET TIMER (كل دقيقة في ثانية + ميلي ثانية محددة)
@@ -1115,116 +1132,141 @@
   function raceGetSlotsOnFirstDays(availDays, maxDays = 3, onWinnerReady) {
     if (!__tpl) return;
     if (!Array.isArray(availDays) || !availDays.length) return;
-
-    const chosen = availDays.slice(0, maxDays);
+  
+    const chosen = availDays.slice(0, maxDays).filter(d => d && d.DateText);
     if (!chosen.length) return;
-
-    const PER_TIMEOUT_MS = 1000;
-
+  
+    const GAP_MS = 1000; // ⬅️ الوقت بين "وقت إرسال" 1 و2 و3 (بدّلو إلا بغيتي)
+  
     __raceWinnerReady = false;
-
+  
+    // state
+    let activeCtrl = null;
+    let activeIdx = -1;
+    let finished = false;
     let backup = null; // { dateText, json }
-
-    (async () => {
-      for (let idx = 0; idx < chosen.length; idx++) {
-        const d = chosen[idx];
-        if (!d || !d.DateText) continue;
-
-        const dateText = d.DateText;
-        const isLast = (idx === chosen.length - 1);
-
-        const ctrl = new AbortController();
-
-        let t = null;
+    const timeouts = [];
+  
+    const startRequest = async (idx) => {
+      if (finished) return;
+      const d = chosen[idx];
+      if (!d) return;
+  
+      const isLast = (idx === chosen.length - 1);
+  
+      // إذا كاين طلب قديم باقي pending => لغيه قبل ما تبدا الجديد
+      if (activeCtrl) {
+        try { activeCtrl.abort(); } catch {}
+        activeCtrl = null;
+      }
+  
+      activeIdx = idx;
+      activeCtrl = new AbortController();
+  
+      const dateText = d.DateText;
+      console.log("[CALENDRIA][DynSlots] race start", idx + 1, "/", chosen.length, dateText, isLast ? "(LAST no-abort)" : "");
+  
+      try {
+        const j = await fetchSlotsForDate(__tpl, dateText, activeCtrl.signal, true);
+  
+        // إلا هادي ماشي الأخيرة => خزنها كـ backup فقط
         if (!isLast) {
-          t = setTimeout(() => { try { ctrl.abort(); } catch {} }, PER_TIMEOUT_MS);
+          backup = { dateText, json: j };
+          console.log("[CALENDRIA][DynSlots] got early response (backup only) for", dateText);
+          return;
         }
-
-        console.log("[CALENDRIA][DynSlots] race try", idx + 1, "/", chosen.length, dateText, isLast ? "(LAST no-abort)" : "");
-
-        try {
-          const j = await fetchSlotsForDate(__tpl, dateText, ctrl.signal, true);
-          if (t) clearTimeout(t);
-
-          if (!isLast) {
-            backup = { dateText, json: j };
-            console.log("[CALENDRIA][DynSlots] got early response (backup only) for", dateText);
-            continue;
-          }
-
-          const url = __tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix;
-
+  
+        // الأخيرة هي الرابح (أو fallback عليها)
+        const url = __tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix;
+        finished = true;
+  
+        __raceWinnerReady = true;
+        onAnyGetAvailableSlots(url, j);
+  
+        __lastRandomDayText = dateText;
+        if (__dateEl) __dateEl.value = dateText;
+  
+        const trigger = document.getElementById("__cal_date_trigger");
+        const popup   = document.getElementById("__cal_days_popup");
+        if (trigger) trigger.textContent = dateText;
+        if (popup) {
+          popup.querySelectorAll(".cal-day-btn").forEach((btn) => {
+            const dt = btn.dataset.dateText;
+            if (!dt) return;
+            btn.classList.toggle("cal-day-selected", dt === dateText);
+          });
+        }
+  
+        showToast(`slots loaded for ${dateText}`, "info");
+        if (typeof onWinnerReady === "function") onWinnerReady(dateText);
+  
+        tryStartAutoIfReady();
+      } catch (err) {
+        // لو تلغى بسبب abort = عادي
+        if (err && err.name === "AbortError") {
+          console.warn("[CALENDRIA][DynSlots] aborted", dateText);
+          return;
+        }
+  
+        console.warn("[CALENDRIA][DynSlots] error for", dateText, err);
+  
+        // إذا كانت الأخيرة فشلت و عندنا backup => استعمل backup
+        if (isLast && backup && !finished) {
+          const bDate = backup.dateText;
+          const bJson = backup.json;
+          const url = __tpl.prefix + encodeURIComponent(bDate) + __tpl.suffix;
+  
+          finished = true;
           __raceWinnerReady = true;
-          onAnyGetAvailableSlots(url, j);
-
-          __lastRandomDayText = dateText;
-          if (__dateEl) __dateEl.value = dateText;
-
+          onAnyGetAvailableSlots(url, bJson);
+  
+          __lastRandomDayText = bDate;
+          if (__dateEl) __dateEl.value = bDate;
+  
           const trigger = document.getElementById("__cal_date_trigger");
           const popup   = document.getElementById("__cal_days_popup");
-          if (trigger) trigger.textContent = dateText;
+          if (trigger) trigger.textContent = bDate;
           if (popup) {
             popup.querySelectorAll(".cal-day-btn").forEach((btn) => {
               const dt = btn.dataset.dateText;
               if (!dt) return;
-              btn.classList.toggle("cal-day-selected", dt === dateText);
+              btn.classList.toggle("cal-day-selected", dt === bDate);
             });
           }
-
-          showToast(`slots loaded for ${dateText}`, "info");
-          if (typeof onWinnerReady === "function") onWinnerReady(dateText);
-
-          // ✅ إذا العداد سالا قبل، نبدا auto مباشرة
+  
+          showToast(`slots loaded for ${bDate} (backup)`, "info");
+          if (typeof onWinnerReady === "function") onWinnerReady(bDate);
+  
           tryStartAutoIfReady();
-          return;
-
-        } catch (err) {
-          if (t) clearTimeout(t);
-
-          if (err && err.name === "AbortError") {
-            console.warn("[CALENDRIA][DynSlots] timeout for", dateText);
-            continue;
-          }
-
-          console.warn("[CALENDRIA][DynSlots] error for", dateText, err);
-
-          if (isLast && backup) {
-            const bDate = backup.dateText;
-            const bJson = backup.json;
-            const url = __tpl.prefix + encodeURIComponent(bDate) + __tpl.suffix;
-
-            __raceWinnerReady = true;
-            onAnyGetAvailableSlots(url, bJson);
-
-            __lastRandomDayText = bDate;
-            if (__dateEl) __dateEl.value = bDate;
-
-            const trigger = document.getElementById("__cal_date_trigger");
-            const popup   = document.getElementById("__cal_days_popup");
-            if (trigger) trigger.textContent = bDate;
-            if (popup) {
-              popup.querySelectorAll(".cal-day-btn").forEach((btn) => {
-                const dt = btn.dataset.dateText;
-                if (!dt) return;
-                btn.classList.toggle("cal-day-selected", dt === bDate);
-              });
-            }
-
-            showToast(`slots loaded for ${bDate} (backup)`, "info");
-            if (typeof onWinnerReady === "function") onWinnerReady(bDate);
-
-            // ✅
-            tryStartAutoIfReady();
-            return;
-          }
-
-          continue;
         }
       }
-
-      console.warn("[CALENDRIA][DynSlots] no winner (last failed and no backup).");
-    })();
+    };
+  
+    // Start #1 now
+    startRequest(0);
+  
+    // Schedule #2 and #3: عند وقتهم كيلغيو اللي قبلهم إلا باقي pending
+    for (let i = 1; i < chosen.length; i++) {
+      const t = setTimeout(() => {
+        startRequest(i);
+      }, GAP_MS * i);
+      timeouts.push(t);
+    }
+  
+    // cleanup (optional)
+    const cleanup = () => {
+      timeouts.forEach(t => { try { clearTimeout(t); } catch {} });
+    };
+  
+    // إذا سالات race بواحد الفائز
+    const doneWatcher = setInterval(() => {
+      if (finished) {
+        clearInterval(doneWatcher);
+        cleanup();
+      }
+    }, 100);
   }
+
 
   // ==========================
   // SAMURAI TIMES (before/after) UI
@@ -1356,3 +1398,4 @@
   boot();
 
 })();
+
