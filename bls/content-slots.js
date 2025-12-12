@@ -533,15 +533,16 @@
       cont.appendChild(b);
       if (idx === 0) b.click();
     });
-
+    
     hideOriginalHoursDropdown();
-  }
-  // ✅ إذا كان الوقت ديال الإرسال جا وكنا كنستناو الساعات
-  if (__autoWaitingForSlots && openSlots && openSlots.length > 0) {
-    __autoWaitingForSlots = false;
-    if (!__autoStarted && AUTO_ENABLED && __autoCountdownDone && __raceWinnerReady) {
-      __autoStarted = true;
-      runAutoSequence(true).catch(e => warn("Auto sequence error", e));
+    if (__autoWaitingForSlots && openSlots && openSlots.length > 0) {
+      __autoWaitingForSlots = false;
+    
+      // إذا مازال ما بداش auto و الشروط كاملة واجدة
+      if (!__autoStarted && AUTO_ENABLED && __autoCountdownDone && __raceWinnerReady) {
+        __autoStarted = true;
+        runAutoSequence(true).catch(e => warn("Auto sequence error", e));
+      }
     }
   }
 
@@ -1398,4 +1399,5 @@
   boot();
 
 })();
+
 
