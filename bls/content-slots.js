@@ -587,25 +587,37 @@
       return false;
     }
   
-    const data = (openSlots || []).map((s, i) => ({
-      Id: String(s.Id),
-      Name: String(s.Name || ""),
-      Count: Number(s.Count) || 0,
-      __idx: i
-    }));
+    // ✅ نحقنو غير المتاحين: Count > 0
+    const data = (openSlots || [])
+      .map(s => ({
+        Id: String(s.Id),
+        Name: String(s.Name || ""),
+        Count: Number(s.Count) || 0
+      }))
+      .filter(x => x.Count > 0);
   
     try {
-      // template ديال العناصر (بحال الصور ديالك)
-      const itemTpl = (d) => {
-        const cls = (Number(d.Count) > 0) ? "bg-success" : "bg-danger";
-        const label = String(d.Name || "");
-        return `<div class="slot-item ${cls}" style="border-radius:8px;padding:4px 18px;cursor:pointer;color:white;">${label}</div>`;
-      };
+      const k = window.kendo;
+      if (!k || !k.template) {
+        warn("kendo.template missing");
+        return false;
+      }
   
-      // value template باش اللي مختار يبقى كيبان مزيان
-      const valueTpl = (d) => (d && d.Name) ? String(d.Name) : "--Select--";
+      // ✅ كل العناصر خضراء + clickable (cursor:pointer)
+      const itemTpl = k.template(`
+        <div class="slot-item bg-success"
+             style="border-radius:8px;
+                    padding:4px 18px;
+                    cursor:pointer;
+                    color:white;">
+          #= Name #
+        </div>
+      `);
   
-      // DropDownList/ComboBox كيدعمو هاد options
+      // ✅ العرض ديال المختار في الهيدر
+      const valueTpl = k.template(`#= data && data.Name ? data.Name : '--Select--' #`);
+  
+      // ✅ تحديث options
       if (typeof w.setOptions === "function") {
         w.setOptions({
           dataTextField: "Name",
@@ -615,34 +627,29 @@
         });
       }
   
-      // دخّل الداتا بطريقة مضمونة
+      // ✅ حط الداتا فـ DataSource
       if (w.dataSource && typeof w.dataSource.data === "function") {
         w.dataSource.data(data);
-      } else if (typeof w.setDataSource === "function" && window.kendo?.data?.DataSource) {
-        w.setDataSource(new window.kendo.data.DataSource({ data }));
+      } else if (typeof w.setDataSource === "function" && k.data && k.data.DataSource) {
+        w.setDataSource(new k.data.DataSource({ data }));
       }
   
-      // refresh الصحيح (حيت refresh() ماشي دايماً موجود)
-      if (w.listView && typeof w.listView.refresh === "function") w.listView.refresh();
-      if (typeof w._refresh === "function") w._refresh();
-      if (typeof w.refresh === "function") w.refresh();
+      // ✅ refresh مضمونة
+      try {
+        if (w.listView && typeof w.listView.refresh === "function") w.listView.refresh();
+        if (typeof w._refresh === "function") w._refresh();
+        if (typeof w.refresh === "function") w.refresh();
+      } catch {}
   
-      // فعّل widget إلا كان disabled
+      // ✅ فعّل widget إلا كان disabled
       if (typeof w.enable === "function") w.enable(true);
   
-      // auto select أول واحد
-      if (data.length) {
-        if (typeof w.value === "function") w.value(data[0].Id);
-        if (typeof w.text === "function") w.text(data[0].Name);
-        if (typeof w.trigger === "function") w.trigger("change");
-        __selectedSlotId = data[0].Id;
-      } else {
-        __selectedSlotId = null;
-        if (typeof w.value === "function") w.value("");
-        if (typeof w.text === "function") w.text("--Select--");
-      }
+      // ✅ ما نفرضوش auto-select (خليه --Select--)
+      __selectedSlotId = null;
+      if (typeof w.value === "function") w.value("");
+      if (typeof w.text === "function") w.text("--Select--");
   
-      // hook change مرة وحدة
+      // ✅ hook change مرة وحدة
       if (!w.__cal_hooked && typeof w.bind === "function") {
         w.__cal_hooked = true;
   
@@ -650,6 +657,7 @@
           const v = (typeof w.value === "function") ? w.value() : "";
           __selectedSlotId = v ? String(v) : null;
   
+          // باش الفورم يفهم التغيير
           if (__slotEl) {
             __slotEl.value = __selectedSlotId || "";
             __slotEl.dispatchEvent(new Event("input", { bubbles: true }));
@@ -657,11 +665,12 @@
           }
         });
   
-        // مهم: فاش كتفتح القائمة، نجبرو list يعاود يرسم (باش ماتبانش خاوية)
+        // ✅ ملي كتفتح القائمة: نفرض refresh باش ما تبقاش خاوية
         w.bind("open", () => {
           try {
             if (w.listView && typeof w.listView.refresh === "function") w.listView.refresh();
             if (typeof w._refresh === "function") w._refresh();
+            if (typeof w.refresh === "function") w.refresh();
           } catch {}
         });
       }
@@ -672,6 +681,7 @@
       return false;
     }
   }
+
 
   function injectSlotsIntoOpenedKendoList(openSlots) {
     if (!openSlots || !openSlots.length) return false;
@@ -1587,6 +1597,7 @@
   boot();
 
 })();
+
 
 
 
