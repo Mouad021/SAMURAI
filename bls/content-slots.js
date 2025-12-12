@@ -152,28 +152,36 @@
     }
   }
 
- function normalizeSlots(json) {
+  const HIDE_ZERO_SLOTS = true;
+  
+  // =========================
+  // 6) تجهيز الساعات: إضافة (count:x) + (اختياري) حذف 0
+  // =========================
+  function normalizeSlots(json) {
     if (!json?.success || !Array.isArray(json.data)) return [];
   
-    return json.data.map(x => {
-      const c = Number(x?.Count) || 0;
-      return {
-        ...x,
-        Count: c,
-        __DisplayName: `${x.Name} (count : ${c})`,
-        __Zero: c <= 0
-      };
-    });
+    const all = json.data.map(x => ({
+      ...x,
+      // مهم: خليه رقم و خليه حاضر حتى فـ template
+      Count: Number(x?.Count) || 0,
+      // مهم: خليه string باش يتطابق مع ddl.value()
+      Id: String(x?.Id ?? ""),
+    }));
+  
+    const list = HIDE_ZERO_SLOTS ? all.filter(x => x.Count > 0) : all;
+  
+    return list.map(x => ({
+      ...x,
+      __DisplayName: `${x.Name} (count : ${x.Count})`
+    }));
   }
 
 
   function pickBestSlot(items) {
-    if (!Array.isArray(items) || !items.length) return null;
-    let best = null;
-    for (const s of items) {
-      if (!best || (Number(s.Count) || 0) > (Number(best.Count) || 0)) best = s;
-    }
-    return best;
+    const valid = (items || []).filter(x => Number(x?.Count) > 0);
+    if (!valid.length) return null;
+    valid.sort((a, b) => (Number(b.Count) || 0) - (Number(a.Count) || 0));
+    return valid[0];
   }
 
   // =========================
@@ -193,47 +201,53 @@
   
     const best = pickBestSlot(itemsWithDisplay);
     if (!best) {
-      warn("No available slots");
+      warn("No available slots (Count>0)");
       return;
     }
   
     try {
-      // ✅ DataSource فيه الاسم الأصلي + count
+      // نخلي Name هو اللي كيبان فـ اللائحة (باش li يبان فيه count)
       const dataForDS = itemsWithDisplay.map(x => ({
         ...x,
-        Name: x.Name,                 // الاسم الأصلي
-        DisplayName: `${x.Name} (count : ${x.Count})`
+        Id: String(x.Id),
+        Count: Number(x.Count) || 0,
+        Name: x.__DisplayName || `${x.Name} (count : ${x.Count})`,
       }));
   
-      // ✅ Template رسمي ديال Kendo (كيبان فـ <li>)
-      ddl.setOptions({
-        template: `
-          <div class="slot-item #= Count > 0 ? 'bg-success' : 'bg-danger' #"
-               style="border-radius:8px;padding:4px 18px;color:white;">
-            #= Name # (count : #= Count #)
-          </div>
-        `,
-        valueTemplate: `
-          <span>#= Name # (count : #= Count #)</span>
-        `
-      });
+      const ds = new window.kendo.data.DataSource({ data: dataForDS });
   
-      // ✅ بدّل DataSource
-      const ds = new kendo.data.DataSource({ data: dataForDS });
       ddl.setDataSource(ds);
       ddl.refresh();
   
-      // ✅ اختيار أفضل ساعة
-      ddl.value(String(best.Id));
-      ddl.trigger("change");
+      // ✅ مهم: نخلي Kendo يكمّل bind قبل select
+      ds.fetch(() => {
+        const data = ddl.dataSource.data();
+        const bestId = String(best.Id);
   
-      log("Slot selected:", best.Name, "Count:", best.Count);
+        const idx = data.findIndex(d => String(d.Id) === bestId);
+        if (idx < 0) {
+          warn("Best slot not found inside DataSource for select()", bestId);
+          return;
+        }
+  
+        // ✅ هادي هي “بحال الدالة القديمة” وكتثبت الاختيار
+        ddl.select(idx);
+        ddl.trigger("change");
+  
+        // ✅ خليه يبان فـ span.k-input بنفس displayName
+        const chosen = data[idx];
+        const shown = chosen?.Name || (best.__DisplayName || `${best.Name} (count : ${best.Count})`);
+        try { ddl.text(shown); } catch {}
+        forceSetDropDownDisplay(ddl, shown);
+  
+        log("Slot selected:", shown, "Id:", bestId, "Count:", best.Count);
+      });
   
     } catch (e) {
       warn("injectSlotsAndSelectBest failed", e);
     }
   }
-
+  
 
 
   // =========================
@@ -313,6 +327,7 @@
   })().catch(e => warn("Fatal", e));
 
 })();
+
 
 
 
