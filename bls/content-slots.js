@@ -4,8 +4,8 @@
   const PATH_OK = /\/mar\/appointment\/slotselection/i.test(location.pathname);
   if (!PATH_OK) return;
 
-  if (window.__cal_auto_pick_day_slot_FINAL_V2) return;
-  window.__cal_auto_pick_day_slot_FINAL_V2 = true;
+  if (window.__cal_auto_pick_day_slot_STABLE) return;
+  window.__cal_auto_pick_day_slot_STABLE = true;
 
   const log  = (...a) => console.log("%c[CAL-AUTO]", "color:#0ff;font-weight:bold;", ...a);
   const warn = (...a) => console.warn("[CAL-AUTO]", ...a);
@@ -14,31 +14,28 @@
 
   const SLOTS_URL_RE = /GetAvailableSlotsByDate/i;
 
-  // ✅ إذا بغيتي 0 مايبانوش خليه true، إلا بغيتي يبانو (بالأحمر) خليه false
+  // ✅ إذا بغيتي 0 مايبانوش نهائياً خليه true
   const REMOVE_ZERO_FROM_LIST = true;
 
-  // ==============
-  // STATE
-  // ==============
   const STATE = {
     pickedDay: "",
     bestId: null,
     bestText: "",
     ddl: null,
     ddlInput: null,
-    ds: null,
-    handlersBound: false,
+    idToCount: new Map(),
+    idToBaseName: new Map(),
     interceptorInstalled: false,
-    patchApplied: false,
+    handlersBound: false,
     lastRespSig: "",
-    refreshScheduled: false
+    rafLock: false
   };
 
-  function scheduleOnce(fn) {
-    if (STATE.refreshScheduled) return;
-    STATE.refreshScheduled = true;
+  function rafOnce(fn){
+    if (STATE.rafLock) return;
+    STATE.rafLock = true;
     requestAnimationFrame(() => {
-      STATE.refreshScheduled = false;
+      STATE.rafLock = false;
       try { fn(); } catch {}
     });
   }
@@ -157,9 +154,7 @@
       dp.element?.trigger?.("change");
       log("Date injected:", dateText);
       return true;
-    } catch (e) {
-      warn("Kendo date inject failed", e);
-    }
+    } catch {}
 
     try {
       inp.value = dateText;
@@ -167,44 +162,18 @@
       inp.dispatchEvent(new Event("change", { bubbles: true }));
       log("Date injected via input events:", dateText);
       return true;
-    } catch (e) {
-      warn("Date input fallback failed", e);
+    } catch {
       return false;
     }
   }
 
   // =========================
-  // 6) normalize slots => Name = "08:30-09:00 (count : X)"
+  // 6) Helpers: update UI without changing DataSource
   // =========================
-  function normalizeSlots(json) {
-    if (!json?.success || !Array.isArray(json.data)) return [];
-
-    const all = json.data.map(x => {
-      const c = Number(x?.Count) || 0;
-      const baseName = String(x?.Name || "").replace(/\s*\(count\s*:\s*\d+\)\s*$/i, "").trim();
-      return {
-        ...x,
-        Count: c,
-        __rawName: baseName,
-        __DisplayName: `${baseName} (count : ${c})`
-      };
-    });
-
-    return REMOVE_ZERO_FROM_LIST ? all.filter(x => x.Count > 0) : all;
+  function baseName(name) {
+    return String(name || "").replace(/\s*\(count\s*:\s*\d+\)\s*$/i, "").trim();
   }
 
-  function pickBestSlot(items) {
-    if (!Array.isArray(items) || !items.length) return null;
-    let best = null;
-    for (const s of items) {
-      if (!best || (Number(s.Count) || 0) > (Number(best.Count) || 0)) best = s;
-    }
-    return best;
-  }
-
-  // =========================
-  // 7) فرض النص فـ span.k-input
-  // =========================
   function forceSetDropDownDisplay(ddl, displayText) {
     try {
       const wrap = ddl.wrapper?.[0];
@@ -213,240 +182,140 @@
     } catch {}
   }
 
-  // =========================
-  // 8) DS بدون template (باش يبقى الستايل ديالك والوانك ديالك)
-  // =========================
-  function buildAndSetDS(ddl, itemsWithDisplay) {
-    const dataForDS = itemsWithDisplay.map(x => ({
-      ...x,
-      // ✅ هادي هي اللي كتخلّي كل LI يطبع count
-      Name: x.__DisplayName,
-      // احتياط
-      __rawName: x.__rawName,
-      __count: Number(x.Count) || 0
-    }));
-
-    if (!STATE.ds) {
-      STATE.ds = new window.kendo.data.DataSource({ data: dataForDS });
-      try { window.slotDataSource = STATE.ds; } catch {}
-      ddl.setDataSource(STATE.ds);
-    } else {
-      // تحديث سريع
-      STATE.ds.data(dataForDS);
-    }
-
-    // refresh مرة وحدة وبـ rAF لتفادي lag
-    scheduleOnce(() => {
-      try { ddl.refresh(); } catch {}
-    });
-  }
-
-  function selectBestAndLock(ddl, items) {
-    const best = pickBestSlot(items);
-    if (!best) return false;
-
-    STATE.bestId = String(best.Id);
-    STATE.bestText = best.__DisplayName;
-
-    try {
-      // value بلا spam ديال change
-      ddl.value(STATE.bestId);
-
-      // نخلي الفورم يعرف القيمة (مرة وحدة)
-      ddl.trigger("change");
-
-      // نثبت display
-      forceSetDropDownDisplay(ddl, STATE.bestText);
-      log("Slot selected:", STATE.bestText, "Id:", STATE.bestId, "Count:", best.Count);
-      return true;
-    } catch (e) {
-      warn("selectBestAndLock failed", e);
-      return false;
-    }
-  }
-  function getIdCountMapFromDS() {
-    try {
-      const map = new Map();
-      if (!STATE.ds) return map;
-      const data = STATE.ds.data ? STATE.ds.data() : [];
-      for (const it of data) {
-        const id = String(it.Id);
-        const c  = Number(it.Count ?? it.__count ?? 0) || 0;
-        map.set(id, c);
+  function pickBestIdFromMaps() {
+    let bestId = null;
+    let bestCount = -1;
+    for (const [id, c] of STATE.idToCount.entries()) {
+      if (c > bestCount) {
+        bestCount = c;
+        bestId = id;
       }
-      return map;
-    } catch {
-      return new Map();
     }
+    return (bestCount > 0) ? bestId : null;
   }
-  
-  function fixListDomClickable(ddl) {
+
+  function applyCountsToDataSourceText(ddl) {
     try {
-      if (!ddl || !ddl.ul) return;
-  
-      const idCount = getIdCountMapFromDS();
-  
-      // ddl.ul = <ul> ديال اللائحة
-      const lis = ddl.ul[0] ? ddl.ul[0].querySelectorAll("li.k-item") : [];
-      lis.forEach((li) => {
-        // جيب id ديال item من kendo (أفضل) أو من index
+      const ds = ddl.dataSource;
+      if (!ds || typeof ds.data !== "function") return;
+
+      const items = ds.data(); // Kendo ObservableArray
+      for (const it of items) {
+        const id = String(it.Id ?? it.id ?? it.Value ?? it.value ?? "");
+        if (!id) continue;
+
+        const c = STATE.idToCount.has(id) ? STATE.idToCount.get(id) : null;
+        if (c == null) continue;
+
+        const bn = STATE.idToBaseName.get(id) || baseName(it.Name);
+        STATE.idToBaseName.set(id, bn);
+
+        const disp = `${bn} (count : ${c})`;
+
+        // ✅ غير بدل النص (ماشي object)
+        try { it.set ? it.set("Name", disp) : (it.Name = disp); } catch {}
+      }
+
+      // تحديث خفيف (بلا ddl.setDataSource)
+      ds.trigger("change");
+    } catch {}
+  }
+
+  function hideZeroItemsInListDom(ddl) {
+    try {
+      if (!ddl || !ddl.ul || !ddl.ul[0]) return;
+      const ul = ddl.ul[0];
+      const lis = ul.querySelectorAll("li.k-item");
+      lis.forEach(li => {
         let id = null;
         try {
           const di = ddl.dataItem(li);
           if (di && di.Id != null) id = String(di.Id);
         } catch {}
-  
-        // fallback: من data-offset-index
-        if (!id) {
-          const idx = li.getAttribute("data-offset-index");
-          try {
-            const view = ddl.dataSource && ddl.dataSource.view ? ddl.dataSource.view() : [];
-            const di2 = view && idx != null ? view[Number(idx)] : null;
-            if (di2 && di2.Id != null) id = String(di2.Id);
-          } catch {}
-        }
-  
-        const count = id && idCount.has(id) ? idCount.get(id) : 0;
-  
-        // ✅ رجّع clickability للساعات المتاحة
-        const shouldEnable = count > 0;
-  
-        // حيد disable classes/attrs اللي كيديرهم الموقع
-        li.classList.remove("k-state-disabled");
-        li.setAttribute("aria-disabled", "false");
-        li.style.pointerEvents = "auto";
-        li.style.opacity = "1";
-  
-        const inner = li.querySelector(".slot-item") || li.firstElementChild;
-        if (inner) {
-          inner.style.pointerEvents = "auto";
-          inner.style.cursor = shouldEnable ? "pointer" : "not-allowed";
-          // رجّع اللون حسب count
-          inner.classList.toggle("bg-success", shouldEnable);
-          inner.classList.toggle("bg-danger", !shouldEnable);
-          // إذا بغيتي 0 يبان (ولكن disabled) خلي هاد السطر
-          if (!shouldEnable) {
-            li.classList.add("k-state-disabled");
-            li.setAttribute("aria-disabled", "true");
-            inner.style.pointerEvents = "none";
-          }
+
+        if (!id) return;
+
+        const c = STATE.idToCount.has(id) ? STATE.idToCount.get(id) : 0;
+        if (REMOVE_ZERO_FROM_LIST && c <= 0) {
+          li.style.display = "none";
+        } else {
+          li.style.display = "";
         }
       });
     } catch {}
   }
-  
-  function scheduleFixList(ddl) {
-    // باش مانزيدوش lag: مرة وحدة فـ tick
-    scheduleOnce(() => {
-      try { fixListDomClickable(ddl); } catch {}
-    });
+
+  function reselectKeep(ddl) {
+    try {
+      if (!ddl) return;
+
+      // إذا مازال ما اخترناش: اختار أحسن كاونت
+      if (!STATE.bestId) {
+        const bestId = pickBestIdFromMaps();
+        if (bestId) STATE.bestId = bestId;
+      }
+
+      if (!STATE.bestId) return;
+
+      // ثبت القيمة
+      ddl.value(String(STATE.bestId));
+      ddl.trigger("change");
+
+      // ثبت النص اللي فـ input
+      const c = STATE.idToCount.get(String(STATE.bestId)) || 0;
+      const bn = STATE.idToBaseName.get(String(STATE.bestId)) || "";
+      STATE.bestText = bn ? `${bn} (count : ${c})` : (STATE.bestText || "");
+      if (STATE.bestText) forceSetDropDownDisplay(ddl, STATE.bestText);
+    } catch {}
   }
 
   // =========================
-  // 9) PATCH OnSlotOpen: خليه يخدم، ومن بعد رجّع counts + selection
+  // 7) Bind events (lightweight, no lag)
   // =========================
-  function patchSiteOnSlotOpen() {
-    if (STATE.patchApplied) return;
-    STATE.patchApplied = true;
-
-    if (typeof window.OnSlotOpen === "function") {
-      const original = window.OnSlotOpen;
-
-      window.OnSlotOpen = function patchedOnSlotOpen() {
-        // ✅ خليه يدير اللي بغا
-        let ret;
-        try { ret = original.apply(this, arguments); } catch (e) {}
-
-        // ✅ من بعد: رجّع ds ديالنا (إذا عندنا) + ثبت selection + display
-        setTimeout(() => {
-          try {
-            const ddl = STATE.ddl;
-            if (!ddl) return;
-          
-            if (STATE.ds) {
-              ddl.setDataSource(STATE.ds);
-              scheduleFixList(STATE.ddl);
-              ddl.refresh();
-            }
-
-            if (STATE.bestId) {
-              ddl.value(STATE.bestId);
-              forceSetDropDownDisplay(ddl, STATE.bestText);
-            }
-          } catch {}
-        }, 0);
-
-        return ret;
-      };
-
-      log("Patched OnSlotOpen (post-fix restore counts/selection).");
-    }
-  }
-
-  function bindKeepSelectionHandlers(ddl) {
+  function bindHandlers(ddl) {
     if (STATE.handlersBound) return;
     STATE.handlersBound = true;
-  
+
     ddl.bind("open", () => {
-      setTimeout(() => {
-        try {
-          // ثبت الاختيار
-          if (STATE.bestId) {
-            ddl.value(STATE.bestId);
-            forceSetDropDownDisplay(ddl, STATE.bestText);
-          }
-          // ✅ رجّع اللائحة clickable + ألوان صحيحة
-          scheduleFixList(ddl);
-        } catch {}
-      }, 0);
+      rafOnce(() => {
+        applyCountsToDataSourceText(ddl);
+        hideZeroItemsInListDom(ddl);
+        reselectKeep(ddl);
+      });
     });
-  
+
     ddl.bind("dataBound", () => {
-      setTimeout(() => {
-        try {
-          if (STATE.bestId) {
-            ddl.value(STATE.bestId);
-            forceSetDropDownDisplay(ddl, STATE.bestText);
-          }
-          scheduleFixList(ddl);
-        } catch {}
-      }, 0);
+      rafOnce(() => {
+        applyCountsToDataSourceText(ddl);
+        hideZeroItemsInListDom(ddl);
+        reselectKeep(ddl);
+      });
     });
-  
+
     ddl.bind("change", () => {
+      // المستخدم يقدر يختار يدوياً
       setTimeout(() => {
         try {
           const di = ddl.dataItem();
           if (di && di.Id != null) {
-            STATE.bestId = String(di.Id);
+            const id = String(di.Id);
+            STATE.bestId = id;
+
+            // di.Name فيه count دابا
             STATE.bestText = String(di.Name || "");
             forceSetDropDownDisplay(ddl, STATE.bestText);
+
+            // خزن base name
+            const bn = baseName(di.Name);
+            if (bn) STATE.idToBaseName.set(id, bn);
           }
-          // ✅ حتى بعد التغيير: خليه ما يقلبش المختار “محظور”
-          scheduleFixList(ddl);
         } catch {}
       }, 0);
     });
   }
-  
-
-  function injectSlotsAndSelectBest(ddl, itemsWithDisplay) {
-    if (!ddl) return;
-    if (!itemsWithDisplay || !itemsWithDisplay.length) {
-      warn("No slots to show (maybe all Count=0).");
-      return;
-    }
-
-    buildAndSetDS(ddl, itemsWithDisplay);
-    patchSiteOnSlotOpen();
-    bindKeepSelectionHandlers(ddl);
-
-    // اختار أحسن واحدة مباشرة (كما النسخة القديمة)
-    selectBestAndLock(ddl, itemsWithDisplay);
-  }
 
   // =========================
-  // 11) XHR interceptor
+  // 8) XHR response handling
   // =========================
   function signatureOf(json) {
     try {
@@ -464,18 +333,51 @@
       if (sig && sig === STATE.lastRespSig) return;
       STATE.lastRespSig = sig;
 
-      const items = normalizeSlots(json);
-      if (!items.length) return warn("Slots response empty after normalize.");
+      if (!json?.success || !Array.isArray(json.data)) return;
+
+      // جهّز maps
+      STATE.idToCount.clear();
+      for (const x of json.data) {
+        const id = String(x?.Id ?? "");
+        if (!id) continue;
+        const c  = Number(x?.Count) || 0;
+
+        // خزن count
+        STATE.idToCount.set(id, c);
+
+        // خزن base name
+        const bn = baseName(x?.Name);
+        if (bn) STATE.idToBaseName.set(id, bn);
+      }
 
       if (!STATE.ddl) {
         const o = findRealSlotDDL();
         if (!o) return warn("Slot DDL not found");
         STATE.ddl = o.ddl;
         STATE.ddlInput = o.inp;
+        bindHandlers(STATE.ddl);
         log("Slot DDL ready:", STATE.ddlInput?.id || STATE.ddlInput?.name || "(unknown)");
       }
 
-      injectSlotsAndSelectBest(STATE.ddl, items);
+      rafOnce(() => {
+        // ✅ غير بدّل النص داخل DS الأصلي
+        applyCountsToDataSourceText(STATE.ddl);
+
+        // ✅ إخفاء 0 (DOM فقط)
+        hideZeroItemsInListDom(STATE.ddl);
+
+        // ✅ اختار أعلى كاونت (كما النسخة القديمة)
+        const bestId = pickBestIdFromMaps();
+        if (bestId) {
+          STATE.bestId = bestId;
+          const c = STATE.idToCount.get(bestId) || 0;
+          const bn = STATE.idToBaseName.get(bestId) || "";
+          STATE.bestText = bn ? `${bn} (count : ${c})` : "";
+          reselectKeep(STATE.ddl);
+          log("Slot selected:", STATE.bestText, "Id:", bestId, "Count:", c);
+        }
+      });
+
     } catch (e) {
       warn("onSlotsResponse error", e);
     }
@@ -499,7 +401,6 @@
           try {
             const url = this.__cal_url || "";
             if (!SLOTS_URL_RE.test(url)) return;
-
             const txt = this.responseText || "";
             const json = JSON.parse(txt);
             onSlotsResponse(json);
@@ -511,7 +412,7 @@
   }
 
   // =========================
-  // 12) BOOT
+  // 9) BOOT
   // =========================
   (async () => {
     if (!await waitForJqKendo()) return warn("jQuery/Kendo not ready (timeout)");
@@ -526,21 +427,20 @@
     STATE.pickedDay = picked.DateText;
     log("Picked random day:", STATE.pickedDay);
 
-    // DatePicker الحقيقي
-    const hasDP = await waitFor(() => !!findRealDatePicker(), 20000, 120);
-    if (!hasDP) return warn("Real DatePicker not found");
-    const dpObj = findRealDatePicker();
-
     // حضّر ddl من اللول
     await waitFor(() => !!findRealSlotDDL(), 20000, 120);
     const o = findRealSlotDDL();
     if (o) {
       STATE.ddl = o.ddl;
       STATE.ddlInput = o.inp;
-      patchSiteOnSlotOpen();
-      bindKeepSelectionHandlers(STATE.ddl);
+      bindHandlers(STATE.ddl);
       log("Slot DDL prepared:", STATE.ddlInput?.id || STATE.ddlInput?.name || "(unknown)");
     }
+
+    // DatePicker الحقيقي
+    const hasDP = await waitFor(() => !!findRealDatePicker(), 20000, 120);
+    if (!hasDP) return warn("Real DatePicker not found");
+    const dpObj = findRealDatePicker();
 
     // حقن التاريخ -> الموقع يرسل GetAvailableSlotsByDate
     if (!setDateWithKendo(dpObj.dp, dpObj.inp, STATE.pickedDay)) return;
