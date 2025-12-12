@@ -575,72 +575,76 @@
   }
   
   function injectSlotsIntoKendoDropdown(openSlots) {
-    const ddl = getKendoSlotDDL();
-    if (!ddl) {
-      setTimeout(() => injectSlotsIntoKendoDropdown(openSlots), 150);
-      return false;
+    if (!__slotEl) __slotEl = getActiveSlotHiddenInputRaw();
+    if (!__slotEl) return false;
+  
+    // popup ديال Kendo لي مربوط بهدا input
+    const popup = document.querySelector(
+      `.k-animation-container .k-list-container[aria-hidden="true"],
+       .k-animation-container .k-list-container[aria-hidden="false"]`
+    );
+    if (!popup) return false;
+  
+    const ul = popup.querySelector("ul.k-list.k-reset");
+    if (!ul) return false;
+  
+    // نفرغ اللائحة
+    ul.innerHTML = "";
+  
+    if (!openSlots || !openSlots.length) {
+      const li = document.createElement("li");
+      li.className = "k-item";
+      li.textContent = "NO DATA FOUND";
+      ul.appendChild(li);
+      return true;
     }
   
-    const data = (openSlots || []).map(s => ({
-      Id: String(s.Id),
-      Name: String(s.Name || "")
-    }));
+    openSlots.forEach((slot, idx) => {
+      const li = document.createElement("li");
+      li.className = "k-item";
+      li.setAttribute("role", "option");
+      li.setAttribute("tabindex", "-1");
+      li.dataset.offsetIndex = String(idx);
   
-    try {
-      // settings ثابتة
-      ddl.setOptions({
-        dataTextField: "Name",
-        dataValueField: "Id",
-        valuePrimitive: true,
-        optionLabel: "" // مهم: باش ما يخليش اللائحة خاوية
+      // نفس الstructure اللي ورّيتي
+      const box = document.createElement("div");
+      box.className = "slot-item bg-danger";
+      box.style.cssText =
+        "border-radius:8px;padding:4px 18px 4px 18px;cursor:pointer;color:white;";
+      box.textContent = slot.Name;
+  
+      li.appendChild(box);
+  
+      li.addEventListener("click", () => {
+        // visually selected
+        ul.querySelectorAll(".k-item").forEach(x =>
+          x.classList.remove("k-state-selected")
+        );
+        li.classList.add("k-state-selected");
+  
+        __selectedSlotId = String(slot.Id);
+  
+        // حدّث input الأصلي
+        __slotEl.value = __selectedSlotId;
+        __slotEl.dispatchEvent(new Event("input", { bubbles: true }));
+        __slotEl.dispatchEvent(new Event("change", { bubbles: true }));
+  
+        // سد popup
+        popup.style.display = "none";
+        popup.setAttribute("aria-hidden", "true");
       });
   
-      const ds = new kendo.data.DataSource({ data });
-      ddl.setDataSource(ds);
+      ul.appendChild(li);
   
-      // ✅ refresh compatible مع كل النسخ
-      if (typeof ddl.refresh === "function") ddl.refresh();
-      if (ddl.listView && typeof ddl.listView.refresh === "function") ddl.listView.refresh();
-  
-      // trick: rebuild popup list
-      if (typeof ddl.open === "function" && typeof ddl.close === "function") {
-        ddl.open();
-        ddl.close();
+      // auto select الأول
+      if (idx === 0) {
+        li.click();
       }
+    });
   
-      // ✅ select أول عنصر
-      if (data.length) {
-        ddl.select(0); // أفضل من value()
-        const item0 = ddl.dataItem(0);
-        __selectedSlotId = item0 ? String(item0.Id) : data[0].Id;
-        if (__slotEl) __slotEl.value = __selectedSlotId;
-      } else {
-        ddl.select(-1);
-        __selectedSlotId = null;
-        if (__slotEl) __slotEl.value = "";
-      }
-  
-      // hook change مرة وحدة
-      if (!ddl.__cal_hooked) {
-        ddl.__cal_hooked = true;
-        ddl.bind("change", () => {
-          const item = ddl.dataItem();
-          __selectedSlotId = item ? String(item.Id) : null;
-  
-          if (__slotEl) {
-            __slotEl.value = __selectedSlotId || "";
-            __slotEl.dispatchEvent(new Event("input", { bubbles: true }));
-            __slotEl.dispatchEvent(new Event("change", { bubbles: true }));
-          }
-        });
-      }
-  
-      return true;
-    } catch (e) {
-      console.warn("injectSlotsIntoKendoDropdown failed", e);
-      return false;
-    }
+    return true;
   }
+
 
 
 
@@ -1480,5 +1484,6 @@
   boot();
 
 })();
+
 
 
