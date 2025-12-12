@@ -4,8 +4,8 @@
   const PATH_OK = /\/mar\/appointment\/slotselection/i.test(location.pathname);
   if (!PATH_OK) return;
 
-  if (window.__cal_auto_pick_day_slot_STABLE) return;
-  window.__cal_auto_pick_day_slot_STABLE = true;
+  if (window.__cal_auto_pick_day_slot_FINAL_V2) return;
+  window.__cal_auto_pick_day_slot_FINAL_V2 = true;
 
   const log  = (...a) => console.log("%c[CAL-AUTO]", "color:#0ff;font-weight:bold;", ...a);
   const warn = (...a) => console.warn("[CAL-AUTO]", ...a);
@@ -14,7 +14,7 @@
 
   const SLOTS_URL_RE = /GetAvailableSlotsByDate/i;
 
-  // ✅ إذا بغيتي 0 مايبانوش نهائياً خليه true
+  // ✅ خليه true (غير المتاحين مايبانوش) => الباقي كاملين خاصهم خضر
   const REMOVE_ZERO_FROM_LIST = true;
 
   const STATE = {
@@ -23,26 +23,23 @@
     bestText: "",
     ddl: null,
     ddlInput: null,
-    idToCount: new Map(),
-    idToBaseName: new Map(),
-    interceptorInstalled: false,
+    ds: null,
     handlersBound: false,
+    interceptorInstalled: false,
+    patchApplied: false,
     lastRespSig: "",
-    rafLock: false
+    refreshScheduled: false
   };
 
-  function rafOnce(fn){
-    if (STATE.rafLock) return;
-    STATE.rafLock = true;
+  function scheduleOnce(fn) {
+    if (STATE.refreshScheduled) return;
+    STATE.refreshScheduled = true;
     requestAnimationFrame(() => {
-      STATE.rafLock = false;
+      STATE.refreshScheduled = false;
       try { fn(); } catch {}
     });
   }
 
-  // =========================
-  // 1) availDates
-  // =========================
   function getAvailDays() {
     const a = window.availDates?.ad;
     if (!Array.isArray(a)) return [];
@@ -58,9 +55,6 @@
     return arr[Math.floor(Math.random() * arr.length)];
   }
 
-  // =========================
-  // 2) انتظار jQuery + Kendo
-  // =========================
   async function waitForJqKendo(maxMs = 20000) {
     const t0 = Date.now();
     while (Date.now() - t0 < maxMs) {
@@ -79,9 +73,6 @@
     return false;
   }
 
-  // =========================
-  // 3) DatePicker الحقيقي
-  // =========================
   function findRealDatePicker() {
     const $ = window.jQuery;
     if (!$) return null;
@@ -113,9 +104,6 @@
     return null;
   }
 
-  // =========================
-  // 4) Slot DropDownList الحقيقي
-  // =========================
   function findRealSlotDDL() {
     const $ = window.jQuery;
     if (!$) return null;
@@ -141,9 +129,6 @@
     return null;
   }
 
-  // =========================
-  // 5) حقن التاريخ
-  // =========================
   function setDateWithKendo(dp, inp, dateText) {
     const [Y, M, D] = String(dateText).split("-").map(n => parseInt(n, 10));
     const dateObj = new Date(Y, (M - 1), D);
@@ -154,7 +139,9 @@
       dp.element?.trigger?.("change");
       log("Date injected:", dateText);
       return true;
-    } catch {}
+    } catch (e) {
+      warn("Kendo date inject failed", e);
+    }
 
     try {
       inp.value = dateText;
@@ -162,16 +149,36 @@
       inp.dispatchEvent(new Event("change", { bubbles: true }));
       log("Date injected via input events:", dateText);
       return true;
-    } catch {
+    } catch (e) {
+      warn("Date input fallback failed", e);
       return false;
     }
   }
 
-  // =========================
-  // 6) Helpers: update UI without changing DataSource
-  // =========================
-  function baseName(name) {
-    return String(name || "").replace(/\s*\(count\s*:\s*\d+\)\s*$/i, "").trim();
+  function normalizeSlots(json) {
+    if (!json?.success || !Array.isArray(json.data)) return [];
+
+    const all = json.data.map(x => {
+      const c = Number(x?.Count) || 0;
+      const baseName = String(x?.Name || "").replace(/\s*\(count\s*:\s*\d+\)\s*$/i, "").trim();
+      return {
+        ...x,
+        Count: c,
+        __rawName: baseName,
+        __DisplayName: `${baseName} (count : ${c})`
+      };
+    });
+
+    return REMOVE_ZERO_FROM_LIST ? all.filter(x => x.Count > 0) : all;
+  }
+
+  function pickBestSlot(items) {
+    if (!Array.isArray(items) || !items.length) return null;
+    let best = null;
+    for (const s of items) {
+      if (!best || (Number(s.Count) || 0) > (Number(best.Count) || 0)) best = s;
+    }
+    return best;
   }
 
   function forceSetDropDownDisplay(ddl, displayText) {
@@ -182,141 +189,181 @@
     } catch {}
   }
 
-  function pickBestIdFromMaps() {
-    let bestId = null;
-    let bestCount = -1;
-    for (const [id, c] of STATE.idToCount.entries()) {
-      if (c > bestCount) {
-        bestCount = c;
-        bestId = id;
-      }
+  function buildAndSetDS(ddl, itemsWithDisplay) {
+    const dataForDS = itemsWithDisplay.map(x => ({
+      ...x,
+      Name: x.__DisplayName,
+      __rawName: x.__rawName,
+      __count: Number(x.Count) || 0
+    }));
+
+    if (!STATE.ds) {
+      STATE.ds = new window.kendo.data.DataSource({ data: dataForDS });
+      try { window.slotDataSource = STATE.ds; } catch {}
+      ddl.setDataSource(STATE.ds);
+    } else {
+      STATE.ds.data(dataForDS);
     }
-    return (bestCount > 0) ? bestId : null;
+
+    scheduleOnce(() => {
+      try { ddl.refresh(); } catch {}
+    });
   }
 
-  function applyCountsToDataSourceText(ddl) {
+  function selectBestAndLock(ddl, items) {
+    const best = pickBestSlot(items);
+    if (!best) return false;
+
+    STATE.bestId = String(best.Id);
+    STATE.bestText = best.__DisplayName;
+
     try {
-      const ds = ddl.dataSource;
-      if (!ds || typeof ds.data !== "function") return;
-
-      const items = ds.data(); // Kendo ObservableArray
-      for (const it of items) {
-        const id = String(it.Id ?? it.id ?? it.Value ?? it.value ?? "");
-        if (!id) continue;
-
-        const c = STATE.idToCount.has(id) ? STATE.idToCount.get(id) : null;
-        if (c == null) continue;
-
-        const bn = STATE.idToBaseName.get(id) || baseName(it.Name);
-        STATE.idToBaseName.set(id, bn);
-
-        const disp = `${bn} (count : ${c})`;
-
-        // ✅ غير بدل النص (ماشي object)
-        try { it.set ? it.set("Name", disp) : (it.Name = disp); } catch {}
-      }
-
-      // تحديث خفيف (بلا ddl.setDataSource)
-      ds.trigger("change");
-    } catch {}
+      ddl.value(STATE.bestId);
+      ddl.trigger("change");
+      forceSetDropDownDisplay(ddl, STATE.bestText);
+      log("Slot selected:", STATE.bestText, "Id:", STATE.bestId, "Count:", best.Count);
+      return true;
+    } catch (e) {
+      warn("selectBestAndLock failed", e);
+      return false;
+    }
   }
 
-  function hideZeroItemsInListDom(ddl) {
+  // =========================
+  // ✅ FIX النهائي: خليهـا ديما خضرا و clickable
+  // =========================
+  function fixListDomClickable(ddl) {
     try {
       if (!ddl || !ddl.ul || !ddl.ul[0]) return;
-      const ul = ddl.ul[0];
-      const lis = ul.querySelectorAll("li.k-item");
-      lis.forEach(li => {
-        let id = null;
-        try {
-          const di = ddl.dataItem(li);
-          if (di && di.Id != null) id = String(di.Id);
-        } catch {}
 
-        if (!id) return;
+      const lis = ddl.ul[0].querySelectorAll("li.k-item");
+      lis.forEach((li) => {
+        // ✅ حيد أي disable كيجي من الموقع
+        li.classList.remove("k-state-disabled");
+        li.setAttribute("aria-disabled", "false");
+        li.style.pointerEvents = "auto";
+        li.style.opacity = "1";
 
-        const c = STATE.idToCount.has(id) ? STATE.idToCount.get(id) : 0;
-        if (REMOVE_ZERO_FROM_LIST && c <= 0) {
-          li.style.display = "none";
-        } else {
-          li.style.display = "";
+        const inner = li.querySelector(".slot-item") || li.firstElementChild;
+        if (inner) {
+          // ✅ خليه clickable
+          inner.style.pointerEvents = "auto";
+          inner.style.cursor = "pointer";
+
+          // ✅ خلي اللون خضر ديما (حيت 0 راه متحيدين)
+          inner.classList.add("bg-success");
+          inner.classList.remove("bg-danger");
         }
       });
     } catch {}
   }
 
-  function reselectKeep(ddl) {
-    try {
-      if (!ddl) return;
-
-      // إذا مازال ما اخترناش: اختار أحسن كاونت
-      if (!STATE.bestId) {
-        const bestId = pickBestIdFromMaps();
-        if (bestId) STATE.bestId = bestId;
-      }
-
-      if (!STATE.bestId) return;
-
-      // ثبت القيمة
-      ddl.value(String(STATE.bestId));
-      ddl.trigger("change");
-
-      // ثبت النص اللي فـ input
-      const c = STATE.idToCount.get(String(STATE.bestId)) || 0;
-      const bn = STATE.idToBaseName.get(String(STATE.bestId)) || "";
-      STATE.bestText = bn ? `${bn} (count : ${c})` : (STATE.bestText || "");
-      if (STATE.bestText) forceSetDropDownDisplay(ddl, STATE.bestText);
-    } catch {}
+  function scheduleFixList(ddl) {
+    scheduleOnce(() => {
+      try { fixListDomClickable(ddl); } catch {}
+    });
   }
 
-  // =========================
-  // 7) Bind events (lightweight, no lag)
-  // =========================
-  function bindHandlers(ddl) {
+  function patchSiteOnSlotOpen() {
+    if (STATE.patchApplied) return;
+    STATE.patchApplied = true;
+
+    if (typeof window.OnSlotOpen === "function") {
+      const original = window.OnSlotOpen;
+
+      window.OnSlotOpen = function patchedOnSlotOpen() {
+        let ret;
+        try { ret = original.apply(this, arguments); } catch (e) {}
+
+        setTimeout(() => {
+          try {
+            const ddl = STATE.ddl;
+            if (!ddl) return;
+
+            // رجّع ds ديالنا (باش يبقاو counts)
+            if (STATE.ds) {
+              ddl.setDataSource(STATE.ds);
+              ddl.refresh();
+            }
+
+            // ✅ رجّع الخضورية + الكليك
+            scheduleFixList(ddl);
+
+            // ✅ ثبت الاختيار
+            if (STATE.bestId) {
+              ddl.value(STATE.bestId);
+              forceSetDropDownDisplay(ddl, STATE.bestText);
+            }
+          } catch {}
+        }, 0);
+
+        return ret;
+      };
+
+      log("Patched OnSlotOpen (keep green & clickable + keep selection).");
+    }
+  }
+
+  function bindKeepSelectionHandlers(ddl) {
     if (STATE.handlersBound) return;
     STATE.handlersBound = true;
 
     ddl.bind("open", () => {
-      rafOnce(() => {
-        applyCountsToDataSourceText(ddl);
-        hideZeroItemsInListDom(ddl);
-        reselectKeep(ddl);
-      });
+      setTimeout(() => {
+        try {
+          if (STATE.bestId) {
+            ddl.value(STATE.bestId);
+            forceSetDropDownDisplay(ddl, STATE.bestText);
+          }
+          scheduleFixList(ddl);
+        } catch {}
+      }, 0);
     });
 
     ddl.bind("dataBound", () => {
-      rafOnce(() => {
-        applyCountsToDataSourceText(ddl);
-        hideZeroItemsInListDom(ddl);
-        reselectKeep(ddl);
-      });
+      setTimeout(() => {
+        try {
+          if (STATE.bestId) {
+            ddl.value(STATE.bestId);
+            forceSetDropDownDisplay(ddl, STATE.bestText);
+          }
+          scheduleFixList(ddl);
+        } catch {}
+      }, 0);
     });
 
     ddl.bind("change", () => {
-      // المستخدم يقدر يختار يدوياً
       setTimeout(() => {
         try {
           const di = ddl.dataItem();
           if (di && di.Id != null) {
-            const id = String(di.Id);
-            STATE.bestId = id;
-
-            // di.Name فيه count دابا
+            STATE.bestId = String(di.Id);
             STATE.bestText = String(di.Name || "");
             forceSetDropDownDisplay(ddl, STATE.bestText);
-
-            // خزن base name
-            const bn = baseName(di.Name);
-            if (bn) STATE.idToBaseName.set(id, bn);
           }
+          // ✅ ما تخليش الموقع يعطّل شي ساعة
+          scheduleFixList(ddl);
         } catch {}
       }, 0);
     });
   }
 
-  // =========================
-  // 8) XHR response handling
-  // =========================
+  function injectSlotsAndSelectBest(ddl, itemsWithDisplay) {
+    if (!ddl) return;
+    if (!itemsWithDisplay || !itemsWithDisplay.length) {
+      warn("No slots to show (maybe all Count=0).");
+      return;
+    }
+
+    buildAndSetDS(ddl, itemsWithDisplay);
+    patchSiteOnSlotOpen();
+    bindKeepSelectionHandlers(ddl);
+    selectBestAndLock(ddl, itemsWithDisplay);
+
+    // ✅ بعد الحقن مباشرة رجّع الخضر + الكليك
+    scheduleFixList(ddl);
+  }
+
   function signatureOf(json) {
     try {
       const arr = json?.data;
@@ -333,51 +380,18 @@
       if (sig && sig === STATE.lastRespSig) return;
       STATE.lastRespSig = sig;
 
-      if (!json?.success || !Array.isArray(json.data)) return;
-
-      // جهّز maps
-      STATE.idToCount.clear();
-      for (const x of json.data) {
-        const id = String(x?.Id ?? "");
-        if (!id) continue;
-        const c  = Number(x?.Count) || 0;
-
-        // خزن count
-        STATE.idToCount.set(id, c);
-
-        // خزن base name
-        const bn = baseName(x?.Name);
-        if (bn) STATE.idToBaseName.set(id, bn);
-      }
+      const items = normalizeSlots(json);
+      if (!items.length) return warn("Slots response empty after normalize.");
 
       if (!STATE.ddl) {
         const o = findRealSlotDDL();
         if (!o) return warn("Slot DDL not found");
         STATE.ddl = o.ddl;
         STATE.ddlInput = o.inp;
-        bindHandlers(STATE.ddl);
         log("Slot DDL ready:", STATE.ddlInput?.id || STATE.ddlInput?.name || "(unknown)");
       }
 
-      rafOnce(() => {
-        // ✅ غير بدّل النص داخل DS الأصلي
-        applyCountsToDataSourceText(STATE.ddl);
-
-        // ✅ إخفاء 0 (DOM فقط)
-        hideZeroItemsInListDom(STATE.ddl);
-
-        // ✅ اختار أعلى كاونت (كما النسخة القديمة)
-        const bestId = pickBestIdFromMaps();
-        if (bestId) {
-          STATE.bestId = bestId;
-          const c = STATE.idToCount.get(bestId) || 0;
-          const bn = STATE.idToBaseName.get(bestId) || "";
-          STATE.bestText = bn ? `${bn} (count : ${c})` : "";
-          reselectKeep(STATE.ddl);
-          log("Slot selected:", STATE.bestText, "Id:", bestId, "Count:", c);
-        }
-      });
-
+      injectSlotsAndSelectBest(STATE.ddl, items);
     } catch (e) {
       warn("onSlotsResponse error", e);
     }
@@ -401,6 +415,7 @@
           try {
             const url = this.__cal_url || "";
             if (!SLOTS_URL_RE.test(url)) return;
+
             const txt = this.responseText || "";
             const json = JSON.parse(txt);
             onSlotsResponse(json);
@@ -411,15 +426,11 @@
     };
   }
 
-  // =========================
-  // 9) BOOT
-  // =========================
   (async () => {
     if (!await waitForJqKendo()) return warn("jQuery/Kendo not ready (timeout)");
 
     installXHRInterceptor();
 
-    // يوم عشوائي
     const days = getAvailDays();
     if (!days.length) return warn("No available days in availDates.ad");
 
@@ -427,22 +438,20 @@
     STATE.pickedDay = picked.DateText;
     log("Picked random day:", STATE.pickedDay);
 
-    // حضّر ddl من اللول
+    const hasDP = await waitFor(() => !!findRealDatePicker(), 20000, 120);
+    if (!hasDP) return warn("Real DatePicker not found");
+    const dpObj = findRealDatePicker();
+
     await waitFor(() => !!findRealSlotDDL(), 20000, 120);
     const o = findRealSlotDDL();
     if (o) {
       STATE.ddl = o.ddl;
       STATE.ddlInput = o.inp;
-      bindHandlers(STATE.ddl);
+      patchSiteOnSlotOpen();
+      bindKeepSelectionHandlers(STATE.ddl);
       log("Slot DDL prepared:", STATE.ddlInput?.id || STATE.ddlInput?.name || "(unknown)");
     }
 
-    // DatePicker الحقيقي
-    const hasDP = await waitFor(() => !!findRealDatePicker(), 20000, 120);
-    if (!hasDP) return warn("Real DatePicker not found");
-    const dpObj = findRealDatePicker();
-
-    // حقن التاريخ -> الموقع يرسل GetAvailableSlotsByDate
     if (!setDateWithKendo(dpObj.dp, dpObj.inp, STATE.pickedDay)) return;
   })().catch(e => warn("Fatal", e));
 
