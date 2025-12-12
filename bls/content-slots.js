@@ -4,8 +4,8 @@
   const PATH_OK = /\/mar\/appointment\/slotselection/i.test(location.pathname);
   if (!PATH_OK) return;
 
-  if (window.__cal_auto_pick_day_slot_FINAL_V2) return;
-  window.__cal_auto_pick_day_slot_FINAL_V2 = true;
+  if (window.__cal_auto_pick_day_slot_FINAL_V3) return;
+  window.__cal_auto_pick_day_slot_FINAL_V3 = true;
 
   const log  = (...a) => console.log("%c[CAL-AUTO]", "color:#0ff;font-weight:bold;", ...a);
   const warn = (...a) => console.warn("[CAL-AUTO]", ...a);
@@ -14,7 +14,7 @@
 
   const SLOTS_URL_RE = /GetAvailableSlotsByDate/i;
 
-  // ✅ خليه true (غير المتاحين مايبانوش) => الباقي كاملين خاصهم خضر
+  // ✅ إذا بغيتي 0 مايبانوش خليه true
   const REMOVE_ZERO_FROM_LIST = true;
 
   const STATE = {
@@ -26,6 +26,7 @@
     ds: null,
     handlersBound: false,
     interceptorInstalled: false,
+    ajaxHookInstalled: false,
     patchApplied: false,
     lastRespSig: "",
     refreshScheduled: false
@@ -129,9 +130,29 @@
     return null;
   }
 
+  function ensureDDL() {
+    try {
+      // إذا تبدّل instance/DOM: عاود لقاه
+      if (!STATE.ddl || !STATE.ddl.wrapper || !STATE.ddl.wrapper[0] || !document.contains(STATE.ddl.wrapper[0])) {
+        const o = findRealSlotDDL();
+        if (o) {
+          STATE.ddl = o.ddl;
+          STATE.ddlInput = o.inp;
+          bindKeepSelectionHandlers(STATE.ddl);
+          patchSiteOnSlotOpen();
+          log("DDL re-acquired:", STATE.ddlInput?.id || STATE.ddlInput?.name || "(unknown)");
+        }
+      }
+    } catch {}
+    return STATE.ddl;
+  }
+
   function setDateWithKendo(dp, inp, dateText) {
     const [Y, M, D] = String(dateText).split("-").map(n => parseInt(n, 10));
     const dateObj = new Date(Y, (M - 1), D);
+
+    // ✅ مهم: ملي كتبدّل النهار، خليه يعاود يحقن من جديد
+    STATE.lastRespSig = "";
 
     try {
       dp.value(dateObj);
@@ -161,12 +182,7 @@
     const all = json.data.map(x => {
       const c = Number(x?.Count) || 0;
       const baseName = String(x?.Name || "").replace(/\s*\(count\s*:\s*\d+\)\s*$/i, "").trim();
-      return {
-        ...x,
-        Count: c,
-        __rawName: baseName,
-        __DisplayName: `${baseName} (count : ${c})`
-      };
+      return { ...x, Count: c, __rawName: baseName, __DisplayName: `${baseName} (count : ${c})` };
     });
 
     return REMOVE_ZERO_FROM_LIST ? all.filter(x => x.Count > 0) : all;
@@ -229,16 +245,12 @@
     }
   }
 
-  // =========================
-  // ✅ FIX النهائي: خليهـا ديما خضرا و clickable
-  // =========================
+  // ✅ ديما خضر و clickable (حيت 0 راه متحيدين)
   function fixListDomClickable(ddl) {
     try {
       if (!ddl || !ddl.ul || !ddl.ul[0]) return;
-
       const lis = ddl.ul[0].querySelectorAll("li.k-item");
       lis.forEach((li) => {
-        // ✅ حيد أي disable كيجي من الموقع
         li.classList.remove("k-state-disabled");
         li.setAttribute("aria-disabled", "false");
         li.style.pointerEvents = "auto";
@@ -246,11 +258,8 @@
 
         const inner = li.querySelector(".slot-item") || li.firstElementChild;
         if (inner) {
-          // ✅ خليه clickable
           inner.style.pointerEvents = "auto";
           inner.style.cursor = "pointer";
-
-          // ✅ خلي اللون خضر ديما (حيت 0 راه متحيدين)
           inner.classList.add("bg-success");
           inner.classList.remove("bg-danger");
         }
@@ -277,19 +286,15 @@
 
         setTimeout(() => {
           try {
-            const ddl = STATE.ddl;
+            const ddl = ensureDDL();
             if (!ddl) return;
 
-            // رجّع ds ديالنا (باش يبقاو counts)
             if (STATE.ds) {
               ddl.setDataSource(STATE.ds);
               ddl.refresh();
             }
-
-            // ✅ رجّع الخضورية + الكليك
             scheduleFixList(ddl);
 
-            // ✅ ثبت الاختيار
             if (STATE.bestId) {
               ddl.value(STATE.bestId);
               forceSetDropDownDisplay(ddl, STATE.bestText);
@@ -300,7 +305,7 @@
         return ret;
       };
 
-      log("Patched OnSlotOpen (keep green & clickable + keep selection).");
+      log("Patched OnSlotOpen.");
     }
   }
 
@@ -341,7 +346,6 @@
             STATE.bestText = String(di.Name || "");
             forceSetDropDownDisplay(ddl, STATE.bestText);
           }
-          // ✅ ما تخليش الموقع يعطّل شي ساعة
           scheduleFixList(ddl);
         } catch {}
       }, 0);
@@ -351,7 +355,7 @@
   function injectSlotsAndSelectBest(ddl, itemsWithDisplay) {
     if (!ddl) return;
     if (!itemsWithDisplay || !itemsWithDisplay.length) {
-      warn("No slots to show (maybe all Count=0).");
+      warn("No slots to show.");
       return;
     }
 
@@ -359,8 +363,6 @@
     patchSiteOnSlotOpen();
     bindKeepSelectionHandlers(ddl);
     selectBestAndLock(ddl, itemsWithDisplay);
-
-    // ✅ بعد الحقن مباشرة رجّع الخضر + الكليك
     scheduleFixList(ddl);
   }
 
@@ -383,15 +385,10 @@
       const items = normalizeSlots(json);
       if (!items.length) return warn("Slots response empty after normalize.");
 
-      if (!STATE.ddl) {
-        const o = findRealSlotDDL();
-        if (!o) return warn("Slot DDL not found");
-        STATE.ddl = o.ddl;
-        STATE.ddlInput = o.inp;
-        log("Slot DDL ready:", STATE.ddlInput?.id || STATE.ddlInput?.name || "(unknown)");
-      }
+      const ddl = ensureDDL();
+      if (!ddl) return warn("Slot DDL not found");
 
-      injectSlotsAndSelectBest(STATE.ddl, items);
+      injectSlotsAndSelectBest(ddl, items);
     } catch (e) {
       warn("onSlotsResponse error", e);
     }
@@ -426,10 +423,41 @@
     };
   }
 
+  // ✅ الجديد: hook ديال $.ajax باش ملي الموقع يكمّل success ديالو كنعاودو نطبّقو التعديلات
+  function installAjaxHook() {
+    if (STATE.ajaxHookInstalled) return;
+    STATE.ajaxHookInstalled = true;
+
+    const $ = window.jQuery;
+    if (!$ || !$.ajax) return;
+
+    const _ajax = $.ajax.bind($);
+    $.ajax = function(settings) {
+      const url = (typeof settings === "string") ? settings : (settings && settings.url) ? settings.url : "";
+      const req = _ajax.apply(this, arguments);
+
+      try {
+        if (SLOTS_URL_RE.test(url) && req && typeof req.then === "function") {
+          req.then((data) => {
+            // ✅ بعد ما الموقع يكمل update ديالو
+            setTimeout(() => {
+              try { onSlotsResponse(data); } catch {}
+            }, 0);
+          }).catch(() => {});
+        }
+      } catch {}
+
+      return req;
+    };
+
+    log("jQuery.ajax hooked for slots.");
+  }
+
   (async () => {
     if (!await waitForJqKendo()) return warn("jQuery/Kendo not ready (timeout)");
 
     installXHRInterceptor();
+    installAjaxHook();
 
     const days = getAvailDays();
     if (!days.length) return warn("No available days in availDates.ad");
@@ -454,5 +482,4 @@
 
     if (!setDateWithKendo(dpObj.dp, dpObj.inp, STATE.pickedDay)) return;
   })().catch(e => warn("Fatal", e));
-
 })();
