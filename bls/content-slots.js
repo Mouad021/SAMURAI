@@ -249,44 +249,45 @@
     const bestId = String(best.Id);
   
     try {
-      // فعل dropdown إذا كان disabled
-      try { ddl.enable(true); } catch {}
-  
+      // فعل dropdown إذا كان disabl  
       // setDataSource بالداتا الأصلية (ما كنبدلوش template)
       const ds = new window.kendo.data.DataSource({ data: itemsRaw });
       ddl.setDataSource(ds);
       ddl.refresh();
   
       ds.fetch(() => {
-        const data = ddl.dataSource.data();
-        const idx = data.findIndex(d => String(d.Id) === bestId);
-  
+        // 🔁 dataSource.data() = Kendo ObservableArray => حولها ل Array
+        const obs = ddl.dataSource.data();
+        const arr = (obs && typeof obs.toJSON === "function") ? obs.toJSON() : Array.from(obs || []);
+      
+        const idx = arr.findIndex(d => String(d.Id) === bestId);
+      
         if (idx >= 0) {
-          // ✅ اختيار ثابت
-          ddl.select(idx);
+          ddl.select(idx);     // ✅ هذا كيثبت الاختيار
         } else {
-          // fallback
-          ddl.value(bestId);
+          ddl.value(bestId);   // fallback
         }
-  
+      
         ddl.trigger("change");
-  
-        // ✅ خلي اللي باين فوق (span.k-input) فيه count حتى إلا template رجّعو
-        const chosen = (idx >= 0 ? data[idx] : best);
+      
+        const chosen = (idx >= 0 ? arr[idx] : best);
         const c = Number(chosen.Count) || 0;
-        const base = (chosen.__baseName || chosen.Name || "").toString().replace(/\s*\(count\s*:\s*\d+\)\s*$/i, "");
+        const base = (chosen.__baseName || chosen.Name || "")
+          .toString()
+          .replace(/\s*\(count\s*:\s*\d+\)\s*$/i, "");
         const shown = `${base} (count : ${c})`;
-  
+      
         try { ddl.text(shown); } catch {}
         forceSetDropDownDisplay(ddl, shown);
-  
-        // ✅ زوّق اللائحة دابا
+      
+        // زوّق اللائحة (li) باش يبانو فيها counts
         setTimeout(() => {
           try { ddl.trigger("dataBound"); } catch {}
         }, 0);
-  
+      
         log("Selected:", shown, "Id:", bestId, "Count:", c);
       });
+
   
     } catch (e) {
       warn("injectSlotsAndSelectBest failed", e);
@@ -372,6 +373,7 @@
   })().catch(e => warn("Fatal", e));
 
 })();
+
 
 
 
