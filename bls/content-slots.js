@@ -194,36 +194,34 @@
 
   function injectSlotsAndSelectBest(ddl, itemsWithDisplay) {
     if (!ddl) return;
-
+  
     const best = pickBestSlot(itemsWithDisplay);
     if (!best) {
       warn("No available slots after filtering (all Count=0?)");
       return;
     }
-
+  
     try {
-      // ✅ أهم جزء: الموقع كيعمر datasource فـ open
-      // حنا كنفرضوه دابا باش value() تخدم بلا فتح
+      // datasource فيه Name = displayName باش حتى اللائحة تبان فيها count
       const dataForDS = itemsWithDisplay.map(x => ({
         ...x,
-        // نخلي Name = displayName باش dropdown + label يبان فيه count
         Name: x.__DisplayName
       }));
-
-      // DataSource جديد (أفضل من تمرير Array مباشرة فبعض النسخ)
+  
       const ds = new window.kendo.data.DataSource({ data: dataForDS });
-
       ddl.setDataSource(ds);
       ddl.refresh();
-
-      // اختار أفضل Id
+  
+      // ✅ اختار بالقيمة
       ddl.value(String(best.Id));
       ddl.trigger("change");
-
-      // فرض عرض النص فـ k-input مباشرة (بحال UI ديال الموقع)
-      forceSetDropDownDisplay(ddl, `${best.Name}`); // best.Name هنا أصلاً فيه (count:x) لأننا بدلناه
-
-      log("Slot selected:", best.Name, "Id:", best.Id, "Count:", best.Count);
+  
+      // ✅ وخلي النص اللي باين فـ dropdown يكون فيه count
+      const shown = best.__DisplayName || `${best.Name} (count : ${best.Count})`;
+      try { ddl.text(shown); } catch {}
+      forceSetDropDownDisplay(ddl, shown);
+  
+      log("Slot selected:", shown, "Id:", best.Id, "Count:", best.Count);
     } catch (e) {
       warn("injectSlotsAndSelectBest failed", e);
     }
@@ -306,3 +304,4 @@
   })().catch(e => warn("Fatal", e));
 
 })();
+
