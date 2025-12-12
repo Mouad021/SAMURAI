@@ -152,24 +152,20 @@
     }
   }
 
-  // =========================
-  // 6) تجهيز الساعات: حذف 0 + إضافة (count:x)
-  // =========================
-  function normalizeSlots(json) {
+ function normalizeSlots(json) {
     if (!json?.success || !Array.isArray(json.data)) return [];
-
-    // Count رقم
-    const all = json.data.map(x => ({ ...x, Count: Number(x?.Count) || 0 }));
-
-    // ✅ حذف 0 نهائياً
-    const nonZero = all.filter(x => x.Count > 0);
-
-    // ✅ زيد (count : X) فالنص
-    return nonZero.map(x => ({
-      ...x,
-      __DisplayName: `${x.Name} (count : ${x.Count})`
-    }));
+  
+    return json.data.map(x => {
+      const c = Number(x?.Count) || 0;
+      return {
+        ...x,
+        Count: c,
+        __DisplayName: `${x.Name} (count : ${c})`,
+        __Zero: c <= 0
+      };
+    });
   }
+
 
   function pickBestSlot(items) {
     if (!Array.isArray(items) || !items.length) return null;
@@ -195,29 +191,40 @@
   function injectSlotsAndSelectBest(ddl, itemsWithDisplay) {
     if (!ddl) return;
   
-    const best = pickBestSlot(itemsWithDisplay);
-    if (!best) {
-      warn("No available slots after filtering (all Count=0?)");
-      return;
-    }
-  
     try {
-      // datasource فيه Name = displayName باش حتى اللائحة تبان فيها count
+      // ✅ dataForDS فيه Name = "__DisplayName"
       const dataForDS = itemsWithDisplay.map(x => ({
         ...x,
         Name: x.__DisplayName
       }));
   
+      // ✅ إذا بغيتي تحيد Count=0 من اللائحة نهائياً:
+      // const dataForDS = itemsWithDisplay.filter(x => Number(x.Count) > 0).map(x => ({...x, Name:x.__DisplayName}));
+  
       const ds = new window.kendo.data.DataSource({ data: dataForDS });
       ddl.setDataSource(ds);
       ddl.refresh();
+      try {
+        ddl.unbind("select.__cal");
+        ddl.bind("select.__cal", function(e) {
+          const item = this.dataItem(e.item.index());
+          if (item && (Number(item.Count) || 0) <= 0) e.preventDefault();
+        });
+      } catch {}
+
+      // ✅ اختار الأفضل (أعلى Count) من dataForDS باش Name يكون فيه count
+      let best = null;
+      for (const s of dataForDS) {
+        if (!best || (Number(s.Count) || 0) > (Number(best.Count) || 0)) best = s;
+      }
+      if (!best) return warn("No slots to select");
   
-      // ✅ اختار بالقيمة
       ddl.value(String(best.Id));
       ddl.trigger("change");
   
-      // ✅ وخلي النص اللي باين فـ dropdown يكون فيه count
-      const shown = best.__DisplayName || `${best.Name} (count : ${best.Count})`;
+      const shown = best.Name; // هنا Name أصلاً فيه (count:x)
+  
+      // ✅ فرض العرض بحال الموقع
       try { ddl.text(shown); } catch {}
       forceSetDropDownDisplay(ddl, shown);
   
@@ -226,6 +233,7 @@
       warn("injectSlotsAndSelectBest failed", e);
     }
   }
+
 
   // =========================
   // 8) قراءة ريسبونس GetAvailableSlotsByDate (XHR فقط باش مانكسروش jq.ajax)
@@ -304,4 +312,5 @@
   })().catch(e => warn("Fatal", e));
 
 })();
+
 
