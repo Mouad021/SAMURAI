@@ -575,27 +575,33 @@
   }
   
   function injectSlotsIntoKendoDropdown(openSlots) {
-    if (!__slotEl) __slotEl = getActiveSlotHiddenInputRaw();
-    if (!__slotEl) return false;
-  
-    // popup ديال Kendo لي مربوط بهدا input
-    const popup = document.querySelector(
-      `.k-animation-container .k-list-container[aria-hidden="true"],
-       .k-animation-container .k-list-container[aria-hidden="false"]`
+    // كنقلبو على popup ديال Appointment Slot بالتحديد
+    // لأنه الوحيد اللي فيه footer فيه #slot-legend
+    const containers = Array.from(
+      document.querySelectorAll(".k-animation-container .k-list-container.k-popup")
     );
-    if (!popup) return false;
   
-    const ul = popup.querySelector("ul.k-list.k-reset");
-    if (!ul) return false;
+    const slotPopup = containers.find(c => c.querySelector("#slot-legend"));
+    if (!slotPopup) {
+      warn("slot popup not found (no #slot-legend)");
+      return false;
+    }
   
-    // نفرغ اللائحة
+    const ul = slotPopup.querySelector("ul.k-list.k-reset[id$='_listbox']");
+    if (!ul) {
+      warn("slot popup UL not found");
+      return false;
+    }
+  
+    // نخبي/نظهر No data found
+    const noData = slotPopup.querySelector(".k-nodata");
+    if (noData) noData.style.display = (openSlots && openSlots.length) ? "none" : "";
+  
+    // نفرغ UL
     ul.innerHTML = "";
   
     if (!openSlots || !openSlots.length) {
-      const li = document.createElement("li");
-      li.className = "k-item";
-      li.textContent = "NO DATA FOUND";
-      ul.appendChild(li);
+      // نخليها خاوية وNo data found تبان
       return true;
     }
   
@@ -606,47 +612,45 @@
       li.setAttribute("tabindex", "-1");
       li.dataset.offsetIndex = String(idx);
   
-      // نفس الstructure اللي ورّيتي
-      const box = document.createElement("div");
-      box.className = "slot-item bg-danger";
-      box.style.cssText =
-        "border-radius:8px;padding:4px 18px 4px 18px;cursor:pointer;color:white;";
-      box.textContent = slot.Name;
+      // نفس الstructure اللي عندك
+      const div = document.createElement("div");
+      div.className = "slot-item bg-danger";
+      div.style.cssText = "border-radius:8px;padding:4px 18px;cursor:pointer;color:white;";
+      div.textContent = slot.Name;
   
-      li.appendChild(box);
+      li.appendChild(div);
   
       li.addEventListener("click", () => {
-        // visually selected
-        ul.querySelectorAll(".k-item").forEach(x =>
-          x.classList.remove("k-state-selected")
-        );
-        li.classList.add("k-state-selected");
+        ul.querySelectorAll(".k-item").forEach(x => {
+          x.classList.remove("k-state-selected", "k-state-focused");
+          x.setAttribute("aria-selected", "false");
+        });
+  
+        li.classList.add("k-state-selected", "k-state-focused");
+        li.setAttribute("aria-selected", "true");
   
         __selectedSlotId = String(slot.Id);
   
-        // حدّث input الأصلي
-        __slotEl.value = __selectedSlotId;
-        __slotEl.dispatchEvent(new Event("input", { bubbles: true }));
-        __slotEl.dispatchEvent(new Event("change", { bubbles: true }));
+        // حدّث hidden/original input
+        if (__slotEl) {
+          __slotEl.value = __selectedSlotId;
+          __slotEl.dispatchEvent(new Event("input", { bubbles: true }));
+          __slotEl.dispatchEvent(new Event("change", { bubbles: true }));
+        }
   
         // سد popup
-        popup.style.display = "none";
-        popup.setAttribute("aria-hidden", "true");
+        slotPopup.style.display = "none";
+        slotPopup.setAttribute("aria-hidden", "true");
       });
   
       ul.appendChild(li);
-  
-      // auto select الأول
-      if (idx === 0) {
-        li.click();
-      }
     });
+  
+    // auto select أول واحد (اختياري)
+    ul.querySelector(".k-item")?.click();
   
     return true;
   }
-
-
-
 
   function onAnyGetAvailableSlots(url, json) {
     if (__toastSlotsWait) {
@@ -1484,6 +1488,7 @@
   boot();
 
 })();
+
 
 
 
