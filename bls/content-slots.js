@@ -699,6 +699,9 @@
       li.setAttribute("aria-selected", "false");
   
       const div = document.createElement("div");
+      const cls = slot.Count >= 5 ? "bg-success" : "bg-warning";
+      div.className = "slot-item " + cls;
+
       div.className = "slot-item bg-danger";
       div.style.cssText = "border-radius:8px;padding:4px 18px;cursor:pointer;color:white;";
       div.textContent = slot.Name;
@@ -1584,6 +1587,7 @@
   boot();
 
 })();
+
 
 
 
