@@ -7,6 +7,9 @@
   if (window.__calendria_dynslots_started) return;
   window.__calendria_dynslots_started = true;
 
+  // ✅ نخزّن وقت دخول الصفحة (باش العداد يبدا من هنا)
+  const __pageEnterTs = performance.now();
+
   // ==========================
   // DELAY من POPUP (DynSlots) + master من Delays
   // ==========================
@@ -35,12 +38,10 @@
       }
 
       // عدد الطلبات التلقائية من الاضافة
-      // المفتاح في الستوريج: calendria_delay_slotselection_requests
       const rawRepeat = snap.calendria_delay_slotselection_requests;
       if (rawRepeat !== undefined && rawRepeat !== null && String(rawRepeat).trim() !== "") {
         const r = parseInt(String(rawRepeat), 10);
         if (!isNaN(r) && r > 0) {
-          // نحصرها بين 1 و 10 فقط
           AUTO_REPEAT_COUNT = Math.min(Math.max(r, 1), 10);
         }
       }
@@ -162,7 +163,6 @@
       const link = document.createElement("link");
       link.id = "__cal_css_link";
       link.rel = "stylesheet";
-      // غيّر هذا الرابط إذا حطيت calendria.css فمسار آخر
       link.href = "https://samurai-88i.pages.dev/bls/calendria.css";
       document.head.appendChild(link);
     } catch (e) {
@@ -287,7 +287,7 @@
     if (!raw.startsWith("/")) raw = "/MAR/appointment/" + raw;
 
     const idx = raw.toLowerCase().indexOf("appointmentdate=");
-       if (idx !== -1) {
+    if (idx !== -1) {
       const after = raw.slice(idx + "appointmentdate=".length);
       return { prefix: raw.slice(0, idx + "appointmentdate=".length), suffix: after };
     }
@@ -328,20 +328,13 @@
     });
   }
 
-  function pickRandomDay(days) {
-    if (!days.length) return null;
-    return days[Math.floor(Math.random() * days.length)];
-  }
-
   async function fetchSlotsForDate(tpl, dateText, signal, isRace = false) {
     const headers = {
       "accept": "application/json, text/plain, */*",
       "x-requested-with": "XMLHttpRequest",
       "RequestVerificationToken": getToken()
     };
-    if (isRace) {
-      headers["X-CAL-RACE"] = "1";
-    }
+    if (isRace) headers["X-CAL-RACE"] = "1";
 
     const res = await fetch(tpl.prefix + encodeURIComponent(dateText) + tpl.suffix, {
       method: "POST",
@@ -453,7 +446,9 @@
     try {
       const j = await fetchSlotsForDate(__tpl, dateText, __slotsAbort.signal, false);
       onAnyGetAvailableSlots(__tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix, j);
-      __raceWinnerReady = true; // إذا اختارها يدويًا، اعتبرها جاهزة للحجز
+      __raceWinnerReady = true; // manual day = جاهز
+      // ✅ إذا العداد سالا قبل، نحاولو نبداو auto دابا
+      tryStartAutoIfReady();
     } catch (e) {}
   }
 
@@ -585,16 +580,12 @@
 
       const isGetSlots = /GetAvailableSlotsByDate/i.test(url || "");
 
-      // نتحقق واش الطلب ديال السباق (X-CAL-RACE)
       let isRace = false;
       try {
         const h = init && init.headers;
         if (h) {
-          if (h instanceof Headers) {
-            isRace = !!h.get("X-CAL-RACE");
-          } else if (typeof h === "object") {
-            isRace = !!(h["X-CAL-RACE"] || h["x-cal-race"]);
-          }
+          if (h instanceof Headers) isRace = !!h.get("X-CAL-RACE");
+          else if (typeof h === "object") isRace = !!(h["X-CAL-RACE"] || h["x-cal-race"]);
         }
       } catch {}
 
@@ -689,7 +680,6 @@
     payloadObj.__RequestVerificationToken =
       getToken() || payloadObj.__RequestVerificationToken || "";
 
-    // ===== ResponseData: فقط المفاتيح المشفرة =====
     const respObj = {};
     const SKIP_IN_RESP = new Set([
       "Data",
@@ -734,10 +724,7 @@
     fd.append("AppointmentFor", payloadObj.AppointmentFor ?? "");
     fd.append("SearchDate",     payloadObj.SearchDate     ?? "");
     fd.append("Loc",            payloadObj.Loc            ?? "");
-    fd.append(
-      "__RequestVerificationToken",
-      payloadObj.__RequestVerificationToken ?? ""
-    );
+    fd.append("__RequestVerificationToken", payloadObj.__RequestVerificationToken ?? "");
 
     return fd;
   }
@@ -816,7 +803,6 @@
   // SUBMITS
   // =======================================================
   async function submitOneHour() {
-    // حماية: ما كنسمحش بأي POST SlotSelection حتى يكمل الرابح ديال GET
     if (!__raceWinnerReady) {
       showToast("wait slots race to finish", "limit");
       return;
@@ -877,40 +863,52 @@
   }
 
   // =======================================================
-  // COUNTDOWN (ميلي ثانية + جزء من الثانية)
+  // ✅ GLOBAL COUNTDOWN (يبدا من أول دخول الصفحة)
   // =======================================================
-  function startInlineCountdownAlways(ms, onDone) {
-    if (!__countdownBtn) {
-      onDone();
+  let __autoCountdownDone = false;
+  let __autoStarted = false;
+
+  function updateCountdownButtonText(leftMs) {
+    if (!__countdownBtn) return;
+    if (leftMs <= 0) __countdownBtn.textContent = "0.000s";
+    else __countdownBtn.textContent = (leftMs / 1000).toFixed(3) + "s";
+  }
+
+  function startGlobalCountdownFromEnter(delayMs, onDone) {
+    if (delayMs <= 0) {
+      __autoCountdownDone = true;
+      updateCountdownButtonText(0);
+      onDone?.();
       return;
     }
 
-    if (ms <= 0) {
-      __countdownBtn.textContent = "0.000s";
-      __countdownBtn.disabled = true;
-      __countdownBtn.remove();
-      onDone();
-      return;
-    }
+    const endTs = __pageEnterTs + delayMs;
 
-    const start = performance.now();
-    const end = start + ms;
+    const tick = (now) => {
+      const left = endTs - now;
+      updateCountdownButtonText(left);
 
-    __countdownBtn.disabled = true;
-
-    function tick(now) {
-      const left = end - now;
       if (left <= 0) {
-        __countdownBtn.textContent = "0.000s";
-        __countdownBtn.remove();
-        onDone();
+        __autoCountdownDone = true;
+        updateCountdownButtonText(0);
+        onDone?.();
         return;
       }
-      __countdownBtn.textContent = (left / 1000).toFixed(3) + "s";
       requestAnimationFrame(tick);
-    }
+    };
 
     requestAnimationFrame(tick);
+  }
+
+  function tryStartAutoIfReady() {
+    // ✅ ما نبداو auto حتى: (1) العداد سالا، (2) race واجد، (3) ما بداش من قبل
+    if (__autoStarted) return;
+    if (!AUTO_ENABLED) return;
+    if (!__autoCountdownDone) return;
+    if (!__raceWinnerReady) return;
+
+    __autoStarted = true;
+    runAutoSequence(/*skipFirstDelay*/ true).catch(e => warn("Auto sequence error", e));
   }
 
   // =======================================================
@@ -931,23 +929,17 @@
   function scheduleTargetTimer(sec, ms) {
     const now = new Date();
     const next = new Date(now.getTime());
-    // نثبت نفس الدقيقة، نغيّر فقط الثانية و الميلي
     next.setSeconds(sec, ms);
-    if (next <= now) {
-      // إذا فات الوقت، نخليه للدقيقة الجاية
-      next.setMinutes(next.getMinutes() + 1);
-    }
+    if (next <= now) next.setMinutes(next.getMinutes() + 1);
+
     __targetNextFireTs   = next.getTime();
     __targetTimerRunning = true;
-    showToast(
-      `target timer started: every minute at ${sec}s + ${ms}ms`,
-      "info"
-    );
+
+    showToast(`target timer started: every minute at ${sec}s + ${ms}ms`, "info");
     targetTimerTick();
   }
 
   async function fireTargetOnce() {
-    // نفس المنطق: POST SlotSelection + autoApplicantSelectionCheck
     try {
       __targetFiringNow = true;
       await submitOneHour();
@@ -966,25 +958,14 @@
     const nowMs = Date.now();
     let left = __targetNextFireTs - nowMs;
 
-    if (disp) {
-      if (left > 0) {
-        disp.textContent = (left / 1000).toFixed(3) + "s";
-      } else {
-        disp.textContent = "0.000s";
-      }
-    }
+    if (disp) disp.textContent = left > 0 ? (left / 1000).toFixed(3) + "s" : "0.000s";
 
     if (left <= 0 && !__targetFiringNow) {
-      // نضرب POST SlotSelection ديالنا + check
       fireTargetOnce();
-      // المرة القادمة بعد 60 ثانية بالضبط
       __targetNextFireTs += 60 * 1000;
-      left = __targetNextFireTs - Date.now();
     }
 
-    if (__targetTimerRunning) {
-      requestAnimationFrame(targetTimerTick);
-    }
+    if (__targetTimerRunning) requestAnimationFrame(targetTimerTick);
   }
 
   // =======================================================
@@ -1023,9 +1004,12 @@
     bc.className = "cal-countdown";
 
     if (AUTO_ENABLED) {
-      bc.textContent = (AUTO_DELAY_MS / 1000).toFixed(3) + "s";
       bc.disabled = false;
       bc.title = "Countdown before auto submit (from DynSlots delay)";
+      // ✅ خلي النص يتحدّث من global countdown
+      const elapsed = performance.now() - __pageEnterTs;
+      const remaining = Math.max(0, AUTO_DELAY_MS - elapsed);
+      bc.textContent = (remaining / 1000).toFixed(3) + "s";
     } else {
       bc.textContent = "AUTO OFF";
       bc.disabled = true;
@@ -1038,10 +1022,9 @@
     bar.appendChild(b2);
     bar.appendChild(bc);
 
-    // ====== TARGET TIMER UI (second + ms) ======
+    // ====== TARGET TIMER UI ======
     const timerBox = document.createElement("div");
     timerBox.className = "cal-timer-box";
-
     timerBox.innerHTML = `
       <div class="cal-timer-row">
         <label for="__cal_tgt_sec">sec</label>
@@ -1057,7 +1040,6 @@
     bar.appendChild(timerBox);
     form.appendChild(bar);
 
-    // events ديال التايمر
     const secInput  = timerBox.querySelector("#__cal_tgt_sec");
     const msInput   = timerBox.querySelector("#__cal_tgt_ms");
     const startBtn  = timerBox.querySelector("#__cal_timer_start");
@@ -1073,7 +1055,6 @@
       secInput.value = String(sec);
       msInput.value  = String(ms);
 
-      // لازم تختار slot مرة واحدة قبل تشغيل التايمر
       if (!__selectedSlotId) {
         showToast("select slot first", "limit");
         return;
@@ -1082,9 +1063,7 @@
       scheduleTargetTimer(sec, ms);
     });
 
-    stopBtn.addEventListener("click", () => {
-      stopTargetTimer();
-    });
+    stopBtn.addEventListener("click", () => stopTargetTimer());
 
     return true;
   }
@@ -1110,23 +1089,20 @@
   }
 
   // =======================================================
-  // AUTO SEQUENCE (delay + تكرار الطلبات)
+  // AUTO SEQUENCE
   // =======================================================
-  async function runAutoSequence() {
+  async function runAutoSequence(skipFirstDelay = false) {
     const repeat = AUTO_REPEAT_COUNT || 1;
-    log("Auto sequence start. delay(ms):", AUTO_DELAY_MS, "repeat:", repeat);
+    log("Auto sequence start. delay(ms):", AUTO_DELAY_MS, "repeat:", repeat, "skipFirstDelay:", skipFirstDelay);
 
     for (let i = 0; i < repeat; i++) {
       if (i === 0) {
-        // أول طلب: يستعمل الـ delay مع العد التنازلي في الزر
-        if (AUTO_DELAY_MS > 0) {
-          await new Promise(resolve => startInlineCountdownAlways(AUTO_DELAY_MS, resolve));
+        // ✅ مهم: ما نديروش delay هنا (راه داز global countdown من لحظة الدخول)
+        if (!skipFirstDelay && AUTO_DELAY_MS > 0) {
+          await sleep(AUTO_DELAY_MS);
         }
       } else {
-        // الطلبات الإضافية: ننتظر REPEAT_GAP_MS فقط بدون عداد في الزر
-        if (REPEAT_GAP_MS > 0) {
-          await sleep(REPEAT_GAP_MS);
-        }
+        if (REPEAT_GAP_MS > 0) await sleep(REPEAT_GAP_MS);
       }
 
       if (SAMURAI_ALL_MODE) await postAllOpenSlotsAuto();
@@ -1139,58 +1115,51 @@
   function raceGetSlotsOnFirstDays(availDays, maxDays = 3, onWinnerReady) {
     if (!__tpl) return;
     if (!Array.isArray(availDays) || !availDays.length) return;
-  
+
     const chosen = availDays.slice(0, maxDays);
     if (!chosen.length) return;
-  
+
     const PER_TIMEOUT_MS = 1000;
-  
+
     __raceWinnerReady = false;
-  
-    // نخزنو أول نجاح من 1/2 كـ backup فقط (بدون ما نطلقو POST)
+
     let backup = null; // { dateText, json }
-  
+
     (async () => {
       for (let idx = 0; idx < chosen.length; idx++) {
         const d = chosen[idx];
         if (!d || !d.DateText) continue;
-  
+
         const dateText = d.DateText;
         const isLast = (idx === chosen.length - 1);
-  
+
         const ctrl = new AbortController();
-  
-        // timeout غير للأولين
+
         let t = null;
         if (!isLast) {
-          t = setTimeout(() => {
-            try { ctrl.abort(); } catch {}
-          }, PER_TIMEOUT_MS);
+          t = setTimeout(() => { try { ctrl.abort(); } catch {} }, PER_TIMEOUT_MS);
         }
-  
+
         console.log("[CALENDRIA][DynSlots] race try", idx + 1, "/", chosen.length, dateText, isLast ? "(LAST no-abort)" : "");
-  
+
         try {
           const j = await fetchSlotsForDate(__tpl, dateText, ctrl.signal, true);
           if (t) clearTimeout(t);
-  
-          // إذا ماشي الأخير: خزن النتيجة فقط وما تدير لا render لا unlock
+
           if (!isLast) {
             backup = { dateText, json: j };
             console.log("[CALENDRIA][DynSlots] got early response (backup only) for", dateText);
             continue;
           }
-  
-          // === هنا وصلنا للأخير و جاوب ===
-          // هو اللي كنعتابرو "الرابح" وكنفتح القفل
+
           const url = __tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix;
-  
+
           __raceWinnerReady = true;
           onAnyGetAvailableSlots(url, j);
-  
+
           __lastRandomDayText = dateText;
           if (__dateEl) __dateEl.value = dateText;
-  
+
           const trigger = document.getElementById("__cal_date_trigger");
           const popup   = document.getElementById("__cal_days_popup");
           if (trigger) trigger.textContent = dateText;
@@ -1201,33 +1170,35 @@
               btn.classList.toggle("cal-day-selected", dt === dateText);
             });
           }
-  
+
           showToast(`slots loaded for ${dateText}`, "info");
           if (typeof onWinnerReady === "function") onWinnerReady(dateText);
+
+          // ✅ إذا العداد سالا قبل، نبدا auto مباشرة
+          tryStartAutoIfReady();
           return;
-  
+
         } catch (err) {
           if (t) clearTimeout(t);
-  
+
           if (err && err.name === "AbortError") {
             console.warn("[CALENDRIA][DynSlots] timeout for", dateText);
             continue;
           }
-  
+
           console.warn("[CALENDRIA][DynSlots] error for", dateText, err);
-  
-          // إذا كان الأخير وفشل: نستعمل backup إذا كان موجود
+
           if (isLast && backup) {
             const bDate = backup.dateText;
             const bJson = backup.json;
             const url = __tpl.prefix + encodeURIComponent(bDate) + __tpl.suffix;
-  
+
             __raceWinnerReady = true;
             onAnyGetAvailableSlots(url, bJson);
-  
+
             __lastRandomDayText = bDate;
             if (__dateEl) __dateEl.value = bDate;
-  
+
             const trigger = document.getElementById("__cal_date_trigger");
             const popup   = document.getElementById("__cal_days_popup");
             if (trigger) trigger.textContent = bDate;
@@ -1238,30 +1209,34 @@
                 btn.classList.toggle("cal-day-selected", dt === bDate);
               });
             }
-  
+
             showToast(`slots loaded for ${bDate} (backup)`, "info");
             if (typeof onWinnerReady === "function") onWinnerReady(bDate);
+
+            // ✅
+            tryStartAutoIfReady();
             return;
           }
-  
+
           continue;
         }
       }
-  
+
       console.warn("[CALENDRIA][DynSlots] no winner (last failed and no backup).");
     })();
   }
+
   // ==========================
   // SAMURAI TIMES (before/after) UI
   // ==========================
   function ensureSamuraiTimesBox() {
     let box = document.getElementById("__cal_samurai_times");
     if (box) return box;
-  
+
     box = document.createElement("div");
     box.id = "__cal_samurai_times";
     box.className = "cal-samurai-times";
-  
+
     box.innerHTML = `
       <div class="cal-samurai-row">
         <span class="cal-samurai-label">click at :</span>
@@ -1272,57 +1247,61 @@
         <span class="cal-samurai-value" id="__cal_samurai_after">--:--:--.---</span>
       </div>
     `;
-  
-    // نحطّو قبل كارت التاريخ (في نفس mb-3 ديال Appointment Date)
+
     const anchor =
       __dateEl?.closest(".mb-3") ||
       (document.querySelector("form") || document.body);
-  
+
     anchor.insertAdjacentElement("afterbegin", box);
     return box;
   }
-  
+
   function readSamuraiTimes() {
-    const before = localStorage.getItem("samurai_before") || "";
-    const after  = localStorage.getItem("samurai_after")  || "";
-    return { before, after };
+    const pick = (k) => {
+      // جرّب localStorage ثم sessionStorage ثم __SAMURAI_STORAGE
+      const a = localStorage.getItem(k);
+      if (a) return a;
+  
+      const b = sessionStorage.getItem(k);
+      if (b) return b;
+  
+      const s = window.__SAMURAI_STORAGE || {};
+      if (s && typeof s[k] === "string" && s[k].trim()) return s[k].trim();
+  
+      return "";
+    };
+  
+    return {
+      before: pick("samurai_before"),
+      after:  pick("samurai_after"),
+    };
   }
   
   function updateSamuraiTimesBox() {
     ensureSamuraiTimesBox();
   
     const { before, after } = readSamuraiTimes();
+  
     const bEl = document.getElementById("__cal_samurai_before");
     const aEl = document.getElementById("__cal_samurai_after");
   
-    if (bEl) bEl.textContent = before ? before : "--:--:--.---";
-    if (aEl) aEl.textContent = after  ? after  : "--:--:--.---";
-  
-    // optional: لون خفيف ملي كيتحدّث
-    const box = document.getElementById("__cal_samurai_times");
-    if (box) {
-      box.classList.remove("cal-samurai-pulse");
-      void box.offsetWidth;
-      box.classList.add("cal-samurai-pulse");
-    }
+    if (bEl) bEl.textContent = before || "--:--:--.---";
+    if (aEl) aEl.textContent = after  || "--:--:--.---";
   }
   
-  // نراقبو تغييرات لوكال (storage event كيخدم ملي كتبدّل من نفس الصفحة؟ لا)
-  // لذلك كنزيدو polling خفيف
   function startSamuraiTimesWatcher() {
     let lastB = null, lastA = null;
   
-    const tick = () => {
+    setInterval(() => {
       const { before, after } = readSamuraiTimes();
       if (before !== lastB || after !== lastA) {
-        lastB = before;
-        lastA = after;
+        lastB = before; lastA = after;
         updateSamuraiTimesBox();
       }
-      requestAnimationFrame(tick);
-    };
-    tick();
+    }, 150);
   }
+
+
   // =======================================================
   // BOOT
   // =======================================================
@@ -1330,17 +1309,17 @@
     injectCssFileOnce();
     installInterceptors();
     initSamuraiMode();
-    
+
     removeOriginalSubmit();
 
     const ok = injectButtons();
     if (!ok) return setTimeout(boot, 200);
-    
+
     await ensureStableNamesReady();
-    
+
     updateSamuraiTimesBox();
     startSamuraiTimesWatcher();
-    
+
     const avail = extractAvailDates();
     __tpl = extractGetSlotsTemplate();
     if (!avail || !__tpl) return;
@@ -1351,20 +1330,29 @@
     hideOriginalDateWidget();
     ensureDaysPicker(availDays);
 
+    // ✅ العداد يبدا من لحظة دخول الصفحة (ماشي من بعد race)
+    if (AUTO_ENABLED) {
+      const elapsed = performance.now() - __pageEnterTs;
+      const remaining = Math.max(0, AUTO_DELAY_MS - elapsed);
+
+      // نخلي العداد يدور… ملي يسالي، كنحاول نبدا auto إلا كان race واجد
+      startGlobalCountdownFromEnter(AUTO_DELAY_MS, () => {
+        // (العنوان محدث تلقائيا)
+        tryStartAutoIfReady();
+      });
+
+      // حتى لو injectButtons جا متأخر، نحدّث النص فوراً
+      updateCountdownButtonText(remaining);
+    }
+
     // فاش ندخل الصفحة: ندير سباق بين 3 تواريخ
     raceGetSlotsOnFirstDays(availDays, 3, () => {
-      // غير من بعد ما الرابح ديال GET يكمّل، نشغل AUTO إذا مفعّل
-      if (AUTO_ENABLED) {
-        runAutoSequence().catch(e => warn("Auto sequence error", e));
-      }
+      // ✅ ما كنشعلوش runAutoSequence هنا مباشرة
+      // كنخلي tryStartAutoIfReady هي اللي تجمع: countdown + race
+      tryStartAutoIfReady();
     });
   }
 
   boot();
 
 })();
-
-
-
-
-
