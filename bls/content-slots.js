@@ -264,6 +264,83 @@
       return false;
     }
   }
+  function getIdCountMapFromDS() {
+    try {
+      const map = new Map();
+      if (!STATE.ds) return map;
+      const data = STATE.ds.data ? STATE.ds.data() : [];
+      for (const it of data) {
+        const id = String(it.Id);
+        const c  = Number(it.Count ?? it.__count ?? 0) || 0;
+        map.set(id, c);
+      }
+      return map;
+    } catch {
+      return new Map();
+    }
+  }
+  
+  function fixListDomClickable(ddl) {
+    try {
+      if (!ddl || !ddl.ul) return;
+  
+      const idCount = getIdCountMapFromDS();
+  
+      // ddl.ul = <ul> ديال اللائحة
+      const lis = ddl.ul[0] ? ddl.ul[0].querySelectorAll("li.k-item") : [];
+      lis.forEach((li) => {
+        // جيب id ديال item من kendo (أفضل) أو من index
+        let id = null;
+        try {
+          const di = ddl.dataItem(li);
+          if (di && di.Id != null) id = String(di.Id);
+        } catch {}
+  
+        // fallback: من data-offset-index
+        if (!id) {
+          const idx = li.getAttribute("data-offset-index");
+          try {
+            const view = ddl.dataSource && ddl.dataSource.view ? ddl.dataSource.view() : [];
+            const di2 = view && idx != null ? view[Number(idx)] : null;
+            if (di2 && di2.Id != null) id = String(di2.Id);
+          } catch {}
+        }
+  
+        const count = id && idCount.has(id) ? idCount.get(id) : 0;
+  
+        // ✅ رجّع clickability للساعات المتاحة
+        const shouldEnable = count > 0;
+  
+        // حيد disable classes/attrs اللي كيديرهم الموقع
+        li.classList.remove("k-state-disabled");
+        li.setAttribute("aria-disabled", "false");
+        li.style.pointerEvents = "auto";
+        li.style.opacity = "1";
+  
+        const inner = li.querySelector(".slot-item") || li.firstElementChild;
+        if (inner) {
+          inner.style.pointerEvents = "auto";
+          inner.style.cursor = shouldEnable ? "pointer" : "not-allowed";
+          // رجّع اللون حسب count
+          inner.classList.toggle("bg-success", shouldEnable);
+          inner.classList.toggle("bg-danger", !shouldEnable);
+          // إذا بغيتي 0 يبان (ولكن disabled) خلي هاد السطر
+          if (!shouldEnable) {
+            li.classList.add("k-state-disabled");
+            li.setAttribute("aria-disabled", "true");
+            inner.style.pointerEvents = "none";
+          }
+        }
+      });
+    } catch {}
+  }
+  
+  function scheduleFixList(ddl) {
+    // باش مانزيدوش lag: مرة وحدة فـ tick
+    scheduleOnce(() => {
+      try { fixListDomClickable(ddl); } catch {}
+    });
+  }
 
   // =========================
   // 9) PATCH OnSlotOpen: خليه يخدم، ومن بعد رجّع counts + selection
@@ -285,9 +362,10 @@
           try {
             const ddl = STATE.ddl;
             if (!ddl) return;
-
+          
             if (STATE.ds) {
               ddl.setDataSource(STATE.ds);
+              scheduleFixList(STATE.ddl);
               ddl.refresh();
             }
 
@@ -305,25 +383,24 @@
     }
   }
 
-  // =========================
-  // 10) Keep selection ثابت (بدون refresh قوي فـ open)
-  // =========================
   function bindKeepSelectionHandlers(ddl) {
     if (STATE.handlersBound) return;
     STATE.handlersBound = true;
-
+  
     ddl.bind("open", () => {
-      // ما نديروش refresh هنا بزاف باش ما يكونش lag
       setTimeout(() => {
         try {
+          // ثبت الاختيار
           if (STATE.bestId) {
             ddl.value(STATE.bestId);
             forceSetDropDownDisplay(ddl, STATE.bestText);
           }
+          // ✅ رجّع اللائحة clickable + ألوان صحيحة
+          scheduleFixList(ddl);
         } catch {}
       }, 0);
     });
-
+  
     ddl.bind("dataBound", () => {
       setTimeout(() => {
         try {
@@ -331,22 +408,27 @@
             ddl.value(STATE.bestId);
             forceSetDropDownDisplay(ddl, STATE.bestText);
           }
+          scheduleFixList(ddl);
         } catch {}
       }, 0);
     });
-
+  
     ddl.bind("change", () => {
-      // ملي المستخدم يختار شي ساعة بيده: خزنها باش ما تضيعش
-      try {
-        const di = ddl.dataItem();
-        if (di && di.Id != null) {
-          STATE.bestId = String(di.Id);
-          STATE.bestText = String(di.Name || "");
-          forceSetDropDownDisplay(ddl, STATE.bestText);
-        }
-      } catch {}
+      setTimeout(() => {
+        try {
+          const di = ddl.dataItem();
+          if (di && di.Id != null) {
+            STATE.bestId = String(di.Id);
+            STATE.bestText = String(di.Name || "");
+            forceSetDropDownDisplay(ddl, STATE.bestText);
+          }
+          // ✅ حتى بعد التغيير: خليه ما يقلبش المختار “محظور”
+          scheduleFixList(ddl);
+        } catch {}
+      }, 0);
     });
   }
+  
 
   function injectSlotsAndSelectBest(ddl, itemsWithDisplay) {
     if (!ddl) return;
