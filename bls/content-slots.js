@@ -1251,10 +1251,78 @@
       console.warn("[CALENDRIA][DynSlots] no winner (last failed and no backup).");
     })();
   }
-
-
-
-
+  // ==========================
+  // SAMURAI TIMES (before/after) UI
+  // ==========================
+  function ensureSamuraiTimesBox() {
+    let box = document.getElementById("__cal_samurai_times");
+    if (box) return box;
+  
+    box = document.createElement("div");
+    box.id = "__cal_samurai_times";
+    box.className = "cal-samurai-times";
+  
+    box.innerHTML = `
+      <div class="cal-samurai-row">
+        <span class="cal-samurai-label">click at :</span>
+        <span class="cal-samurai-value" id="__cal_samurai_before">--:--:--.---</span>
+      </div>
+      <div class="cal-samurai-row">
+        <span class="cal-samurai-label">enter at :</span>
+        <span class="cal-samurai-value" id="__cal_samurai_after">--:--:--.---</span>
+      </div>
+    `;
+  
+    // نحطّو قبل كارت التاريخ (في نفس mb-3 ديال Appointment Date)
+    const anchor =
+      __dateEl?.closest(".mb-3") ||
+      (document.querySelector("form") || document.body);
+  
+    anchor.insertAdjacentElement("afterbegin", box);
+    return box;
+  }
+  
+  function readSamuraiTimes() {
+    const before = localStorage.getItem("samurai_before") || "";
+    const after  = localStorage.getItem("samurai_after")  || "";
+    return { before, after };
+  }
+  
+  function updateSamuraiTimesBox() {
+    ensureSamuraiTimesBox();
+  
+    const { before, after } = readSamuraiTimes();
+    const bEl = document.getElementById("__cal_samurai_before");
+    const aEl = document.getElementById("__cal_samurai_after");
+  
+    if (bEl) bEl.textContent = before ? before : "--:--:--.---";
+    if (aEl) aEl.textContent = after  ? after  : "--:--:--.---";
+  
+    // optional: لون خفيف ملي كيتحدّث
+    const box = document.getElementById("__cal_samurai_times");
+    if (box) {
+      box.classList.remove("cal-samurai-pulse");
+      void box.offsetWidth;
+      box.classList.add("cal-samurai-pulse");
+    }
+  }
+  
+  // نراقبو تغييرات لوكال (storage event كيخدم ملي كتبدّل من نفس الصفحة؟ لا)
+  // لذلك كنزيدو polling خفيف
+  function startSamuraiTimesWatcher() {
+    let lastB = null, lastA = null;
+  
+    const tick = () => {
+      const { before, after } = readSamuraiTimes();
+      if (before !== lastB || after !== lastA) {
+        lastB = before;
+        lastA = after;
+        updateSamuraiTimesBox();
+      }
+      requestAnimationFrame(tick);
+    };
+    tick();
+  }
   // =======================================================
   // BOOT
   // =======================================================
@@ -1262,14 +1330,17 @@
     injectCssFileOnce();
     installInterceptors();
     initSamuraiMode();
-
+    
     removeOriginalSubmit();
 
     const ok = injectButtons();
     if (!ok) return setTimeout(boot, 200);
-
+    
     await ensureStableNamesReady();
-
+    
+    updateSamuraiTimesBox();
+    startSamuraiTimesWatcher();
+    
     const avail = extractAvailDates();
     __tpl = extractGetSlotsTemplate();
     if (!avail || !__tpl) return;
@@ -1292,6 +1363,7 @@
   boot();
 
 })();
+
 
 
 
