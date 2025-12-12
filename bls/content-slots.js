@@ -673,6 +673,79 @@
     }
   }
 
+  function injectSlotsIntoOpenedKendoList(openSlots) {
+    if (!openSlots || !openSlots.length) return false;
+  
+    // كنجبد آخر popup مفتوح (ديال Appointment Slot)
+    const popups = Array.from(document.querySelectorAll(".k-animation-container .k-list-container.k-popup"));
+    const popup = popups.find(p => p.querySelector(".k-list-scroller ul.k-list[id$='_listbox']"));
+    if (!popup) return false;
+  
+    const ul = popup.querySelector(".k-list-scroller ul.k-list[id$='_listbox']");
+    if (!ul) return false;
+  
+    // hide "No data found"
+    const nodata = popup.querySelector(".k-nodata");
+    if (nodata) nodata.style.display = "none";
+  
+    ul.innerHTML = "";
+  
+    openSlots.forEach((slot, idx) => {
+      const li = document.createElement("li");
+      li.className = "k-item";
+      li.setAttribute("role", "option");
+      li.setAttribute("tabindex", "-1");
+      li.dataset.offsetIndex = String(idx);
+      li.setAttribute("aria-selected", "false");
+  
+      const div = document.createElement("div");
+      div.className = "slot-item bg-danger";
+      div.style.cssText = "border-radius:8px;padding:4px 18px;cursor:pointer;color:white;";
+      div.textContent = slot.Name;
+  
+      li.appendChild(div);
+  
+      li.addEventListener("click", () => {
+        ul.querySelectorAll(".k-item").forEach(x => {
+          x.classList.remove("k-state-selected", "k-state-focused");
+          x.setAttribute("aria-selected", "false");
+        });
+  
+        li.classList.add("k-state-selected", "k-state-focused");
+        li.setAttribute("aria-selected", "true");
+  
+        __selectedSlotId = String(slot.Id);
+  
+        if (__slotEl) {
+          __slotEl.value = __selectedSlotId;
+          __slotEl.dispatchEvent(new Event("input", { bubbles: true }));
+          __slotEl.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+  
+        // إذا كاين widget خليه يتزامن
+        const w = getKendoSlotWidget();
+        try { if (w && typeof w.value === "function") w.value(__selectedSlotId); } catch {}
+      });
+  
+      ul.appendChild(li);
+    });
+  
+    return true;
+  }
+  
+  function hookKendoOpenForSlotsOnce() {
+    const w = getKendoSlotWidget();
+    if (!w || w.__cal_open_hooked) return;
+    w.__cal_open_hooked = true;
+  
+    if (typeof w.bind === "function") {
+      w.bind("open", () => {
+        setTimeout(() => {
+          injectSlotsIntoOpenedKendoList(__lastOpenSlots);
+        }, 0);
+      });
+    }
+  }
 
   function onAnyGetAvailableSlots(url, json) {
     if (__toastSlotsWait) {
@@ -691,7 +764,7 @@
   
     // ✅ هنا التغيير المهم
     injectSlotsIntoKendoDropdown(openSlots);
-  
+    hookKendoOpenForSlotsOnce();
     try {
       chrome.runtime.sendMessage(
         {
@@ -1484,7 +1557,8 @@
     if (!ok) return setTimeout(boot, 200);
     
     await ensureStableNamesReady();
-    
+    hookKendoOpenForSlotsOnce();
+
     updateSamuraiTimesBox();
     startSamuraiTimesWatcher();
     
@@ -1510,6 +1584,7 @@
   boot();
 
 })();
+
 
 
 
