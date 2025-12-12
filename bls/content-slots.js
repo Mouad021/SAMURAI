@@ -5,92 +5,99 @@
     return;
   }
 
-  console.log("[STEP1] calendar selector started");
+  console.log("[STEP1] using availDates");
 
   /* ===============================
-     1️⃣ نلقاو الكاليندار الحقيقي
+     1️⃣ نجيب availDates الحقيقي
      =============================== */
-  function getRealCalendarContainer() {
-    const containers = Array.from(
-      document.querySelectorAll('.k-animation-container')
+  function getAvailDates() {
+    try {
+      if (window.availDates && Array.isArray(window.availDates.ad)) {
+        return window.availDates.ad;
+      }
+    } catch {}
+    return [];
+  }
+
+  /* ===============================
+     2️⃣ نفلتر الأيام المتاحة فقط
+     AppointmentDateType === 0
+     =============================== */
+  function getAvailableDays(ad) {
+    return ad.filter(d =>
+      d &&
+      d.AppointmentDateType === 0 &&
+      d.DateValue &&
+      d.DateText
     );
-
-    return containers.find(c => {
-      const style = getComputedStyle(c);
-      if (style.display === "none") return false;
-      if (c.getAttribute("aria-hidden") === "true") return false;
-      return c.querySelector(".k-widget.k-calendar");
-    }) || null;
   }
 
   /* ===============================
-     2️⃣ استخراج الأيام المتاحة
+     3️⃣ نلقاو input الحقيقي
      =============================== */
-  function getAvailableDays(calendarRoot) {
-    if (!calendarRoot) return [];
-
-    return Array.from(
-      calendarRoot.querySelectorAll('a.k-link[data-value]')
-    ).filter(a => {
-      if (a.closest("td")?.classList.contains("k-state-disabled")) return false;
-      if (a.getAttribute("tabindex") === "-1") return false;
-      return true;
-    });
+  function getDateInput() {
+    return (
+      document.querySelector('input[data-role="datepicker"]') ||
+      document.querySelector('#AppointmentDate') ||
+      document.querySelector('.k-datepicker input')
+    );
   }
 
   /* ===============================
-     3️⃣ اختيار يوم عشوائي
+     4️⃣ نحقن اليوم + نطلق events
      =============================== */
-  function pickRandomDay(days) {
-    if (!days.length) return null;
-    return days[Math.floor(Math.random() * days.length)];
-  }
+  function setDate(input, day) {
+    console.log("[STEP1] select date:", day.DateText, day.DateValue);
 
-  /* ===============================
-     4️⃣ تنفيذ onclick الحقيقي
-     =============================== */
-  function clickDay(dayEl) {
-    if (!dayEl) return;
+    // حقن القيمة اللي كيفهمها Kendo
+    input.value = day.DateText; // yyyy-mm-dd (display)
 
-    console.log("[STEP1] clicking day:", dayEl.dataset.value);
+    // events عادية
+    input.dispatchEvent(new Event("input",  { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
 
-    dayEl.scrollIntoView({ block: "center" });
+    // إذا Kendo موجود → change الحقيقي
+    try {
+      const picker = $(input).data("kendoDatePicker");
+      if (picker) {
+        picker.value(new Date(day.DateText));
+        picker.trigger("change");
+      }
+    } catch {}
 
-    dayEl.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-    dayEl.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-    dayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    return true;
   }
 
   /* ===============================
      5️⃣ BOOT
      =============================== */
-  function bootTry() {
-    const cont = getRealCalendarContainer();
-    if (!cont) return false;
-
-    const calendar = cont.querySelector(".k-widget.k-calendar");
-    const days = getAvailableDays(calendar);
-
-    console.log("[STEP1] available days:", days.length);
-
-    if (!days.length) return false;
-
-    const chosen = pickRandomDay(days);
-    clickDay(chosen);
-
-    console.log("[STEP1] done ✔️");
-    return true;
-  }
-
-  /* ===============================
-     6️⃣ retry حتى يحمّل DOM
-     =============================== */
   let tries = 0;
   const iv = setInterval(() => {
     tries++;
-    if (bootTry() || tries > 30) {
-      clearInterval(iv);
+
+    const ad = getAvailDates();
+    if (!ad.length) {
+      if (tries > 20) clearInterval(iv);
+      return;
     }
+
+    const available = getAvailableDays(ad);
+    console.log("[STEP1] available days:", available.length);
+
+    if (!available.length) {
+      clearInterval(iv);
+      return;
+    }
+
+    const input = getDateInput();
+    if (!input || input.disabled : false) return;
+
+    const chosen = available[Math.floor(Math.random() * available.length)];
+    setDate(input, chosen);
+
+    console.log("[STEP1] DONE ✔️");
+    clearInterval(iv);
+
   }, 200);
 
 })();
