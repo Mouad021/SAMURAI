@@ -781,32 +781,6 @@
     return res;
   }
 
-  // =======================================================
-  // ApplicantSelection CHECK
-  // =======================================================
-  async function autoApplicantSelectionCheck() {
-    const form = document.querySelector("form") || document.body;
-    const dataVal = form.querySelector('input[name="Data"]')?.value || "";
-    const locVal  = form.querySelector('input[name="Loc"]')?.value  || "";
-    if (!dataVal || !locVal) return false;
-
-    const url = `/MAR/Appointment/ApplicantSelection?data=${encodeURIComponent(dataVal)}&loc=${encodeURIComponent(locVal)}`;
-
-    try {
-      const res = await fetch(url, {
-        method: "GET",
-        credentials: "include",
-        redirect: "manual"
-      });
-      if (res.status === 200) {
-        clearAllToasts();
-        showToast("rendez-vous reserved", "reserved", { persistent: true });
-        window.location.href = url;
-        return true;
-      }
-    } catch {}
-    return false;
-  }
 
   // =======================================================
   // SUBMITS
@@ -837,7 +811,6 @@
     const fd = buildFormDataForSlot({ dateText, slotId, base, controls, form });
 
     await postSlotSelection(fd);
-    await autoApplicantSelectionCheck();
   }
 
   async function postAllOpenSlotsAuto() {
@@ -862,7 +835,6 @@
       const fd = buildFormDataForSlot({ dateText, slotId, base, controls, form });
 
       await postSlotSelection(fd);
-      const redirected = await autoApplicantSelectionCheck();
       if (redirected) return;
     }
   }
@@ -961,7 +933,6 @@
     try {
       __targetFiringNow = true;
       await submitOneHour();
-      await autoApplicantSelectionCheck();
     } catch (e) {
       warn("Target timer fire error", e);
     } finally {
@@ -1399,5 +1370,6 @@
   boot();
 
 })();
+
 
 
