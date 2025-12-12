@@ -583,33 +583,44 @@
   
     const data = (openSlots || []).map(s => ({
       Id: String(s.Id),
-      Name: String(s.Name || ""),
+      Name: String(s.Name || "")
     }));
   
     try {
-      // 🔴 مهم: نفرض settings قبل datasource
+      // settings ثابتة
       ddl.setOptions({
         dataTextField: "Name",
         dataValueField: "Id",
-        valuePrimitive: true,   // 🔥 هذا هو المفتاح
-        optionLabel: ""         // نحيّدو optionLabel
+        valuePrimitive: true,
+        optionLabel: "" // مهم: باش ما يخليش اللائحة خاوية
       });
   
       const ds = new kendo.data.DataSource({ data });
       ddl.setDataSource(ds);
   
-      // 🔴 نعمل refresh حقيقي
-      ddl._refresh();
+      // ✅ refresh compatible مع كل النسخ
+      if (typeof ddl.refresh === "function") ddl.refresh();
+      if (ddl.listView && typeof ddl.listView.refresh === "function") ddl.listView.refresh();
   
+      // trick: rebuild popup list
+      if (typeof ddl.open === "function" && typeof ddl.close === "function") {
+        ddl.open();
+        ddl.close();
+      }
+  
+      // ✅ select أول عنصر
       if (data.length) {
-        // 🔥 select بدل value
-        ddl.select(0);
-        __selectedSlotId = data[0].Id;
+        ddl.select(0); // أفضل من value()
+        const item0 = ddl.dataItem(0);
+        __selectedSlotId = item0 ? String(item0.Id) : data[0].Id;
+        if (__slotEl) __slotEl.value = __selectedSlotId;
       } else {
         ddl.select(-1);
         __selectedSlotId = null;
+        if (__slotEl) __slotEl.value = "";
       }
   
+      // hook change مرة وحدة
       if (!ddl.__cal_hooked) {
         ddl.__cal_hooked = true;
         ddl.bind("change", () => {
@@ -630,6 +641,7 @@
       return false;
     }
   }
+
 
 
   function onAnyGetAvailableSlots(url, json) {
@@ -1468,4 +1480,5 @@
   boot();
 
 })();
+
 
