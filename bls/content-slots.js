@@ -559,98 +559,120 @@
     return (window.kendo && window.kendo.jQuery) ? window.kendo.jQuery : null;
   }
   
-  function getKendoSlotDDL() {
+  function getKendoSlotWidget() {
     const jq = getKendoJQ();
     if (!jq) return null;
   
-    // __slotEl هو input الأصلي data-role="dropdownlist"
     if (!__slotEl) __slotEl = getActiveSlotHiddenInputRaw();
     if (!__slotEl) return null;
   
     try {
-      return jq(__slotEl).data("kendoDropDownList") || null;
+      const $el = jq(__slotEl);
+      return (
+        $el.data("kendoDropDownList") ||
+        $el.data("kendoComboBox") ||
+        $el.data("kendoMultiColumnComboBox") ||
+        null
+      );
     } catch {
       return null;
     }
   }
+
   
   function injectSlotsIntoKendoDropdown(openSlots) {
-    // كنقلبو على popup ديال Appointment Slot بالتحديد
-    // لأنه الوحيد اللي فيه footer فيه #slot-legend
-    const containers = Array.from(
-      document.querySelectorAll(".k-animation-container .k-list-container.k-popup")
-    );
-  
-    const slotPopup = containers.find(c => c.querySelector("#slot-legend"));
-    if (!slotPopup) {
-      warn("slot popup not found (no #slot-legend)");
+    const w = getKendoSlotWidget();
+    if (!w) {
+      warn("Kendo widget not found yet");
       return false;
     }
   
-    const ul = slotPopup.querySelector("ul.k-list.k-reset[id$='_listbox']");
-    if (!ul) {
-      warn("slot popup UL not found");
-      return false;
-    }
+    const data = (openSlots || []).map((s, i) => ({
+      Id: String(s.Id),
+      Name: String(s.Name || ""),
+      Count: Number(s.Count) || 0,
+      __idx: i
+    }));
   
-    // نخبي/نظهر No data found
-    const noData = slotPopup.querySelector(".k-nodata");
-    if (noData) noData.style.display = (openSlots && openSlots.length) ? "none" : "";
+    try {
+      // template ديال العناصر (بحال الصور ديالك)
+      const itemTpl = (d) => {
+        const cls = (Number(d.Count) > 0) ? "bg-success" : "bg-danger";
+        const label = String(d.Name || "");
+        return `<div class="slot-item ${cls}" style="border-radius:8px;padding:4px 18px;cursor:pointer;color:white;">${label}</div>`;
+      };
   
-    // نفرغ UL
-    ul.innerHTML = "";
+      // value template باش اللي مختار يبقى كيبان مزيان
+      const valueTpl = (d) => (d && d.Name) ? String(d.Name) : "--Select--";
   
-    if (!openSlots || !openSlots.length) {
-      // نخليها خاوية وNo data found تبان
-      return true;
-    }
+      // DropDownList/ComboBox كيدعمو هاد options
+      if (typeof w.setOptions === "function") {
+        w.setOptions({
+          dataTextField: "Name",
+          dataValueField: "Id",
+          template: itemTpl,
+          valueTemplate: valueTpl
+        });
+      }
   
-    openSlots.forEach((slot, idx) => {
-      const li = document.createElement("li");
-      li.className = "k-item";
-      li.setAttribute("role", "option");
-      li.setAttribute("tabindex", "-1");
-      li.dataset.offsetIndex = String(idx);
+      // دخّل الداتا بطريقة مضمونة
+      if (w.dataSource && typeof w.dataSource.data === "function") {
+        w.dataSource.data(data);
+      } else if (typeof w.setDataSource === "function" && window.kendo?.data?.DataSource) {
+        w.setDataSource(new window.kendo.data.DataSource({ data }));
+      }
   
-      // نفس الstructure اللي عندك
-      const div = document.createElement("div");
-      div.className = "slot-item bg-danger";
-      div.style.cssText = "border-radius:8px;padding:4px 18px;cursor:pointer;color:white;";
-      div.textContent = slot.Name;
+      // refresh الصحيح (حيت refresh() ماشي دايماً موجود)
+      if (w.listView && typeof w.listView.refresh === "function") w.listView.refresh();
+      if (typeof w._refresh === "function") w._refresh();
+      if (typeof w.refresh === "function") w.refresh();
   
-      li.appendChild(div);
+      // فعّل widget إلا كان disabled
+      if (typeof w.enable === "function") w.enable(true);
   
-      li.addEventListener("click", () => {
-        ul.querySelectorAll(".k-item").forEach(x => {
-          x.classList.remove("k-state-selected", "k-state-focused");
-          x.setAttribute("aria-selected", "false");
+      // auto select أول واحد
+      if (data.length) {
+        if (typeof w.value === "function") w.value(data[0].Id);
+        if (typeof w.text === "function") w.text(data[0].Name);
+        if (typeof w.trigger === "function") w.trigger("change");
+        __selectedSlotId = data[0].Id;
+      } else {
+        __selectedSlotId = null;
+        if (typeof w.value === "function") w.value("");
+        if (typeof w.text === "function") w.text("--Select--");
+      }
+  
+      // hook change مرة وحدة
+      if (!w.__cal_hooked && typeof w.bind === "function") {
+        w.__cal_hooked = true;
+  
+        w.bind("change", () => {
+          const v = (typeof w.value === "function") ? w.value() : "";
+          __selectedSlotId = v ? String(v) : null;
+  
+          if (__slotEl) {
+            __slotEl.value = __selectedSlotId || "";
+            __slotEl.dispatchEvent(new Event("input", { bubbles: true }));
+            __slotEl.dispatchEvent(new Event("change", { bubbles: true }));
+          }
         });
   
-        li.classList.add("k-state-selected", "k-state-focused");
-        li.setAttribute("aria-selected", "true");
+        // مهم: فاش كتفتح القائمة، نجبرو list يعاود يرسم (باش ماتبانش خاوية)
+        w.bind("open", () => {
+          try {
+            if (w.listView && typeof w.listView.refresh === "function") w.listView.refresh();
+            if (typeof w._refresh === "function") w._refresh();
+          } catch {}
+        });
+      }
   
-        __selectedSlotId = String(slot.Id);
-  
-        // حدّث hidden/original input
-        if (__slotEl) {
-          __slotEl.value = __selectedSlotId;
-          __slotEl.dispatchEvent(new Event("input", { bubbles: true }));
-          __slotEl.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-  
-        // سد popup
-        slotPopup.style.display = "none";
-        slotPopup.setAttribute("aria-hidden", "true");
-      });
-  
-      ul.appendChild(li);
-    });
-  
-    // auto select أول واحد (اختياري)
-    ul.querySelector(".k-item")?.click();
-  
-    return true;
+      return true;
+    } catch (e) {
+      warn("injectSlotsIntoKendoDropdown failed", e);
+      return false;
+    }
   }
+
 
   function onAnyGetAvailableSlots(url, json) {
     if (__toastSlotsWait) {
@@ -1488,6 +1510,7 @@
   boot();
 
 })();
+
 
 
 
