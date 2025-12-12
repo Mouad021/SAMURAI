@@ -1143,27 +1143,20 @@
     const chosen = availDays.slice(0, maxDays);
     if (!chosen.length) return;
   
-    const PER_TIMEOUT_MS   = 1000; // 1s للأولين فقط
-    const OVERALL_LIMIT_MS = 3000; // 3s إجمالي قبل ما نبداو الأخير
+    const PER_TIMEOUT_MS = 1000;
   
     __raceWinnerReady = false;
   
-    (async () => {
-      const startTs = Date.now();
+    // نخزنو أول نجاح من 1/2 كـ backup فقط (بدون ما نطلقو POST)
+    let backup = null; // { dateText, json }
   
+    (async () => {
       for (let idx = 0; idx < chosen.length; idx++) {
         const d = chosen[idx];
         if (!d || !d.DateText) continue;
   
         const dateText = d.DateText;
         const isLast = (idx === chosen.length - 1);
-  
-        // قبل ما نوصلو للأخير: نحترمو limit ديال 3 ثواني
-        // ولكن فالأخير: ماكانوقفوش حتى يجاوب
-        if (!isLast && (Date.now() - startTs > OVERALL_LIMIT_MS)) {
-          console.warn("[CALENDRIA][DynSlots] race overall limit reached before last, stopping early.");
-          break;
-        }
   
         const ctrl = new AbortController();
   
@@ -1175,56 +1168,87 @@
           }, PER_TIMEOUT_MS);
         }
   
-        console.log("[CALENDRIA][DynSlots] race try day", idx, dateText, isLast ? "(LAST: no-abort)" : "");
+        console.log("[CALENDRIA][DynSlots] race try", idx + 1, "/", chosen.length, dateText, isLast ? "(LAST no-abort)" : "");
   
         try {
           const j = await fetchSlotsForDate(__tpl, dateText, ctrl.signal, true);
           if (t) clearTimeout(t);
   
-          // هذا هو الرابح
-          __raceWinnerReady = true;
+          // إذا ماشي الأخير: خزن النتيجة فقط وما تدير لا render لا unlock
+          if (!isLast) {
+            backup = { dateText, json: j };
+            console.log("[CALENDRIA][DynSlots] got early response (backup only) for", dateText);
+            continue;
+          }
   
+          // === هنا وصلنا للأخير و جاوب ===
+          // هو اللي كنعتابرو "الرابح" وكنفتح القفل
           const url = __tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix;
+  
+          __raceWinnerReady = true;
           onAnyGetAvailableSlots(url, j);
   
-          // تحديث اليوم في الـ UI
           __lastRandomDayText = dateText;
           if (__dateEl) __dateEl.value = dateText;
   
           const trigger = document.getElementById("__cal_date_trigger");
           const popup   = document.getElementById("__cal_days_popup");
           if (trigger) trigger.textContent = dateText;
-  
           if (popup) {
             popup.querySelectorAll(".cal-day-btn").forEach((btn) => {
               const dt = btn.dataset.dateText;
               if (!dt) return;
-              if (dt === dateText) btn.classList.add("cal-day-selected");
-              else                 btn.classList.remove("cal-day-selected");
+              btn.classList.toggle("cal-day-selected", dt === dateText);
             });
           }
   
           showToast(`slots loaded for ${dateText}`, "info");
-  
           if (typeof onWinnerReady === "function") onWinnerReady(dateText);
+          return;
   
-          return; // مهم: نحبسو هنا باش مانمشيوش لليوم اللي بعدو
         } catch (err) {
           if (t) clearTimeout(t);
   
           if (err && err.name === "AbortError") {
-            console.warn("[CALENDRIA][DynSlots] race timeout for", dateText);
+            console.warn("[CALENDRIA][DynSlots] timeout for", dateText);
             continue;
           }
   
-          console.warn("[CALENDRIA][DynSlots] race error for", dateText, err);
+          console.warn("[CALENDRIA][DynSlots] error for", dateText, err);
   
-          // إلا كان الأخير ووقع error (ماشي Abort) نقدر نخليه يرجّع/يكمّل حسب بغيتي
+          // إذا كان الأخير وفشل: نستعمل backup إذا كان موجود
+          if (isLast && backup) {
+            const bDate = backup.dateText;
+            const bJson = backup.json;
+            const url = __tpl.prefix + encodeURIComponent(bDate) + __tpl.suffix;
+  
+            __raceWinnerReady = true;
+            onAnyGetAvailableSlots(url, bJson);
+  
+            __lastRandomDayText = bDate;
+            if (__dateEl) __dateEl.value = bDate;
+  
+            const trigger = document.getElementById("__cal_date_trigger");
+            const popup   = document.getElementById("__cal_days_popup");
+            if (trigger) trigger.textContent = bDate;
+            if (popup) {
+              popup.querySelectorAll(".cal-day-btn").forEach((btn) => {
+                const dt = btn.dataset.dateText;
+                if (!dt) return;
+                btn.classList.toggle("cal-day-selected", dt === bDate);
+              });
+            }
+  
+            showToast(`slots loaded for ${bDate} (backup)`, "info");
+            if (typeof onWinnerReady === "function") onWinnerReady(bDate);
+            return;
+          }
+  
           continue;
         }
       }
   
-      console.warn("[CALENDRIA][DynSlots] no race winner after trying all days.");
+      console.warn("[CALENDRIA][DynSlots] no winner (last failed and no backup).");
     })();
   }
 
@@ -1268,6 +1292,7 @@
   boot();
 
 })();
+
 
 
 
