@@ -191,48 +191,49 @@
   function injectSlotsAndSelectBest(ddl, itemsWithDisplay) {
     if (!ddl) return;
   
+    const best = pickBestSlot(itemsWithDisplay);
+    if (!best) {
+      warn("No available slots");
+      return;
+    }
+  
     try {
-      // ✅ dataForDS فيه Name = "__DisplayName"
+      // ✅ DataSource فيه الاسم الأصلي + count
       const dataForDS = itemsWithDisplay.map(x => ({
         ...x,
-        Name: x.__DisplayName
+        Name: x.Name,                 // الاسم الأصلي
+        DisplayName: `${x.Name} (count : ${x.Count})`
       }));
   
-      // ✅ إذا بغيتي تحيد Count=0 من اللائحة نهائياً:
-      // const dataForDS = itemsWithDisplay.filter(x => Number(x.Count) > 0).map(x => ({...x, Name:x.__DisplayName}));
+      // ✅ Template رسمي ديال Kendo (كيبان فـ <li>)
+      ddl.setOptions({
+        template: `
+          <div class="slot-item #= Count > 0 ? 'bg-success' : 'bg-danger' #"
+               style="border-radius:8px;padding:4px 18px;color:white;">
+            #= Name # (count : #= Count #)
+          </div>
+        `,
+        valueTemplate: `
+          <span>#= Name # (count : #= Count #)</span>
+        `
+      });
   
-      const ds = new window.kendo.data.DataSource({ data: dataForDS });
+      // ✅ بدّل DataSource
+      const ds = new kendo.data.DataSource({ data: dataForDS });
       ddl.setDataSource(ds);
       ddl.refresh();
-      try {
-        ddl.unbind("select.__cal");
-        ddl.bind("select.__cal", function(e) {
-          const item = this.dataItem(e.item.index());
-          if (item && (Number(item.Count) || 0) <= 0) e.preventDefault();
-        });
-      } catch {}
-
-      // ✅ اختار الأفضل (أعلى Count) من dataForDS باش Name يكون فيه count
-      let best = null;
-      for (const s of dataForDS) {
-        if (!best || (Number(s.Count) || 0) > (Number(best.Count) || 0)) best = s;
-      }
-      if (!best) return warn("No slots to select");
   
+      // ✅ اختيار أفضل ساعة
       ddl.value(String(best.Id));
       ddl.trigger("change");
   
-      const shown = best.Name; // هنا Name أصلاً فيه (count:x)
+      log("Slot selected:", best.Name, "Count:", best.Count);
   
-      // ✅ فرض العرض بحال الموقع
-      try { ddl.text(shown); } catch {}
-      forceSetDropDownDisplay(ddl, shown);
-  
-      log("Slot selected:", shown, "Id:", best.Id, "Count:", best.Count);
     } catch (e) {
       warn("injectSlotsAndSelectBest failed", e);
     }
   }
+
 
 
   // =========================
@@ -312,5 +313,6 @@
   })().catch(e => warn("Fatal", e));
 
 })();
+
 
 
