@@ -552,26 +552,105 @@
 
     hideOriginalHoursDropdown();
   }
+  // =======================================================
+  // KENDO DROPDOWN INJECTION (replace custom boxes)
+  // =======================================================
+  function getKendoJQ() {
+    return (window.kendo && window.kendo.jQuery) ? window.kendo.jQuery : null;
+  }
+  
+  function getKendoSlotDDL() {
+    const jq = getKendoJQ();
+    if (!jq) return null;
+  
+    // __slotEl هو input الأصلي data-role="dropdownlist"
+    if (!__slotEl) __slotEl = getActiveSlotHiddenInputRaw();
+    if (!__slotEl) return null;
+  
+    try {
+      return jq(__slotEl).data("kendoDropDownList") || null;
+    } catch {
+      return null;
+    }
+  }
+  
+  function injectSlotsIntoKendoDropdown(openSlots) {
+    const ddl = getKendoSlotDDL();
+    if (!ddl) {
+      warn("Kendo DropDownList not found yet");
+      return false;
+    }
+  
+    // كنخلي غير slots المفتوحة
+    const data = (openSlots || []).map(s => ({
+      Id: String(s.Id),
+      Name: String(s.Name || ""),
+      Count: Number(s.Count) || 0
+    }));
+  
+    // بدّل الداتا فالدروبداون
+    try {
+      // تأكد fields
+      ddl.setOptions({ dataTextField: "Name", dataValueField: "Id" });
+  
+      // DataSource جديدة
+      const jq = getKendoJQ();
+      const ds = new window.kendo.data.DataSource({ data });
+      ddl.setDataSource(ds);
+      ddl.refresh();
+  
+      // auto-select أول واحد إذا كاين
+      if (data.length) {
+        ddl.value(data[0].Id);
+        ddl.trigger("change");
+  
+        __selectedSlotId = data[0].Id; // نخليوه متزامن
+      } else {
+        ddl.value(""); // empty
+        __selectedSlotId = null;
+      }
+  
+      // تراقب تغييرات المستخدم
+      if (!ddl.__cal_hooked) {
+        ddl.__cal_hooked = true;
+        ddl.bind("change", () => {
+          const v = ddl.value();
+          __selectedSlotId = v ? String(v) : null;
+  
+          // باش الفورم يفهم التغيير
+          if (__slotEl) {
+            __slotEl.value = __selectedSlotId || "";
+            __slotEl.dispatchEvent(new Event("input", { bubbles: true }));
+            __slotEl.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+        });
+      }
+  
+      return true;
+    } catch (e) {
+      warn("injectSlotsIntoKendoDropdown failed", e);
+      return false;
+    }
+  }
 
-  // =======================================================
-  // CENTRAL HOOK
-  // =======================================================
   function onAnyGetAvailableSlots(url, json) {
     if (__toastSlotsWait) {
       hideToast(__toastSlotsWait);
       __toastSlotsWait = null;
     }
-
+  
     const dateText =
       extractAppointmentDateFromUrl(url) ||
       (__dateEl?.value || __lastRandomDayText);
+  
     const openSlots = parseOpenSlots(json);
-
+  
     __lastOpenSlots = openSlots;
     __lastRandomDayText = dateText;
-
-    renderSlotBoxes(openSlots);
-
+  
+    // ✅ هنا التغيير المهم
+    injectSlotsIntoKendoDropdown(openSlots);
+  
     try {
       chrome.runtime.sendMessage(
         {
@@ -582,6 +661,7 @@
       );
     } catch {}
   }
+
 
   // =======================================================
   // INTERCEPTORS
@@ -1389,9 +1469,3 @@
   boot();
 
 })();
-
-
-
-
-
-
