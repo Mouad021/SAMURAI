@@ -757,7 +757,7 @@
       extractAppointmentDateFromUrl(url) ||
       (__dateEl?.value || __lastRandomDayText);
   
-    const openSlots = parseOpenSlots(json);
+    const openSlots = parseOpenSlots(json).filter(s => Number(s.Count) > 1);
   
     __lastOpenSlots = openSlots;
     __lastRandomDayText = dateText;
@@ -1584,6 +1584,7 @@
   boot();
 
 })();
+
 
 
 
