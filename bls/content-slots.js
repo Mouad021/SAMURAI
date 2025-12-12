@@ -154,26 +154,61 @@
 
   const HIDE_ZERO_SLOTS = true;
   
-  // =========================
-  // 6) تجهيز الساعات: إضافة (count:x) + (اختياري) حذف 0
-  // =========================
   function normalizeSlots(json) {
     if (!json?.success || !Array.isArray(json.data)) return [];
-  
-    const all = json.data.map(x => ({
+    return json.data.map(x => ({
       ...x,
-      // مهم: خليه رقم و خليه حاضر حتى فـ template
-      Count: Number(x?.Count) || 0,
-      // مهم: خليه string باش يتطابق مع ddl.value()
       Id: String(x?.Id ?? ""),
+      Count: Number(x?.Count) || 0,
+      __baseName: String(x?.Name ?? ""),
+      __displayName: `${String(x?.Name ?? "")} (count : ${Number(x?.Count) || 0})`
     }));
+  }
+  // كتزيّن اللائحة ديال Kendo (li) حسب Count بلا ما نبدلو template الأصلي
+  function ensureSlotListDecorators(ddl) {
+    if (ddl.__countDecoratorsInstalled) return;
+    ddl.__countDecoratorsInstalled = true;
   
-    const list = HIDE_ZERO_SLOTS ? all.filter(x => x.Count > 0) : all;
+    const decorate = () => {
+      try {
+        const ul = ddl.ul && ddl.ul[0];
+        if (!ul) return;
   
-    return list.map(x => ({
-      ...x,
-      __DisplayName: `${x.Name} (count : ${x.Count})`
-    }));
+        const lis = ul.querySelectorAll("li.k-item");
+        lis.forEach(li => {
+          const item = ddl.dataItem(li);
+          if (!item) return;
+  
+          const c = Number(item.Count) || 0;
+  
+          // hide Count=0 (إلا بغيتي)
+          if (HIDE_ZERO_SLOTS && c <= 0) {
+            li.style.display = "none";
+            return;
+          } else {
+            li.style.display = "";
+          }
+  
+          // غالباً template ديالك كيدير <div class="slot-item ...">TIME</div>
+          const slotDiv = li.querySelector(".slot-item");
+          const base = (item.__baseName || item.Name || "").toString().replace(/\s*\(count\s*:\s*\d+\)\s*$/i, "");
+          const shown = `${base} (count : ${c})`;
+  
+          if (slotDiv) {
+            // بدّل النص داخل slot-item
+            slotDiv.textContent = shown;
+          } else {
+            // fallback: بدّل نص li كامل
+            li.textContent = shown;
+          }
+        });
+      } catch {}
+    };
+  
+    // كل مرة كيتبدّل datasource كيتطلق dataBound
+    ddl.bind("dataBound", decorate);
+    // ووقت open (باش تكون ul تولدت)
+    ddl.bind("open", () => setTimeout(decorate, 0));
   }
 
 
@@ -196,51 +231,61 @@
     } catch {}
   }
 
-  function injectSlotsAndSelectBest(ddl, itemsWithDisplay) {
+  function injectSlotsAndSelectBest(ddl, itemsRaw) {
     if (!ddl) return;
   
-    const best = pickBestSlot(itemsWithDisplay);
-    if (!best) {
-      warn("No available slots (Count>0)");
+    // ركّب ديكور مرة وحدة باش li ديماً يبانو بالكاونت
+    ensureSlotListDecorators(ddl);
+  
+    // خذ غير اللي Count>0 لاختيار best (حتى إلا ماخبيتيش 0)
+    const valid = (itemsRaw || []).filter(x => (Number(x?.Count) || 0) > 0);
+    if (!valid.length) {
+      warn("No slots Count>0");
       return;
     }
   
+    valid.sort((a,b) => (Number(b.Count)||0) - (Number(a.Count)||0));
+    const best = valid[0];
+    const bestId = String(best.Id);
+  
     try {
-      // نخلي Name هو اللي كيبان فـ اللائحة (باش li يبان فيه count)
-      const dataForDS = itemsWithDisplay.map(x => ({
-        ...x,
-        Id: String(x.Id),
-        Count: Number(x.Count) || 0,
-        Name: x.__DisplayName || `${x.Name} (count : ${x.Count})`,
-      }));
+      // فعل dropdown إذا كان disabled
+      try { ddl.enable(true); } catch {}
   
-      const ds = new window.kendo.data.DataSource({ data: dataForDS });
-  
+      // setDataSource بالداتا الأصلية (ما كنبدلوش template)
+      const ds = new window.kendo.data.DataSource({ data: itemsRaw });
       ddl.setDataSource(ds);
       ddl.refresh();
   
-      // ✅ مهم: نخلي Kendo يكمّل bind قبل select
       ds.fetch(() => {
         const data = ddl.dataSource.data();
-        const bestId = String(best.Id);
-  
         const idx = data.findIndex(d => String(d.Id) === bestId);
-        if (idx < 0) {
-          warn("Best slot not found inside DataSource for select()", bestId);
-          return;
+  
+        if (idx >= 0) {
+          // ✅ اختيار ثابت
+          ddl.select(idx);
+        } else {
+          // fallback
+          ddl.value(bestId);
         }
   
-        // ✅ هادي هي “بحال الدالة القديمة” وكتثبت الاختيار
-        ddl.select(idx);
         ddl.trigger("change");
   
-        // ✅ خليه يبان فـ span.k-input بنفس displayName
-        const chosen = data[idx];
-        const shown = chosen?.Name || (best.__DisplayName || `${best.Name} (count : ${best.Count})`);
+        // ✅ خلي اللي باين فوق (span.k-input) فيه count حتى إلا template رجّعو
+        const chosen = (idx >= 0 ? data[idx] : best);
+        const c = Number(chosen.Count) || 0;
+        const base = (chosen.__baseName || chosen.Name || "").toString().replace(/\s*\(count\s*:\s*\d+\)\s*$/i, "");
+        const shown = `${base} (count : ${c})`;
+  
         try { ddl.text(shown); } catch {}
         forceSetDropDownDisplay(ddl, shown);
   
-        log("Slot selected:", shown, "Id:", bestId, "Count:", best.Count);
+        // ✅ زوّق اللائحة دابا
+        setTimeout(() => {
+          try { ddl.trigger("dataBound"); } catch {}
+        }, 0);
+  
+        log("Selected:", shown, "Id:", bestId, "Count:", c);
       });
   
     } catch (e) {
@@ -327,6 +372,7 @@
   })().catch(e => warn("Fatal", e));
 
 })();
+
 
 
 
