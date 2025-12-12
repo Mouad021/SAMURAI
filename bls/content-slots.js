@@ -443,19 +443,30 @@
     btn.classList.add("cal-day-selected");
     trigger.textContent = dateText;
     popup.classList.remove("open");
-
+  
     __lastRandomDayText = dateText;
     if (__dateEl) __dateEl.value = dateText;
-
+  
     try { __slotsAbort?.abort(); } catch {}
     __slotsAbort = new AbortController();
-
+  
     try {
       const j = await fetchSlotsForDate(__tpl, dateText, __slotsAbort.signal, false);
+  
+      const openSlots = parseOpenSlots(j);
+      if (!openSlots.length) {
+        __raceWinnerReady = false;
+        showToast("no open slots", "limit");
+        // باش الواجهة تبان فيها "No open slots for this day"
+        onAnyGetAvailableSlots(__tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix, j);
+        return;
+      }
+  
       onAnyGetAvailableSlots(__tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix, j);
-      __raceWinnerReady = true; // إذا اختارها يدويًا، اعتبرها جاهزة للحجز
+      __raceWinnerReady = true;
     } catch (e) {}
   }
+
 
   // =======================================================
   // HOURS BOX UI
@@ -1181,8 +1192,14 @@
             continue;
           }
   
-          // === هنا وصلنا للأخير و جاوب ===
-          // هو اللي كنعتابرو "الرابح" وكنفتح القفل
+          const openSlots = parseOpenSlots(j);
+          if (!openSlots.length) {
+            console.warn("[CALENDRIA][DynSlots] last GET answered but no open slots -> keep locked");
+            __raceWinnerReady = false;
+            showToast("no open slots (last GET)", "limit");
+            return;
+          }
+
           const url = __tpl.prefix + encodeURIComponent(dateText) + __tpl.suffix;
   
           __raceWinnerReady = true;
@@ -1216,18 +1233,26 @@
   
           console.warn("[CALENDRIA][DynSlots] error for", dateText, err);
   
-          // إذا كان الأخير وفشل: نستعمل backup إذا كان موجود
           if (isLast && backup) {
             const bDate = backup.dateText;
             const bJson = backup.json;
+          
+            const openSlotsB = parseOpenSlots(bJson);
+            if (!openSlotsB.length) {
+              console.warn("[CALENDRIA][DynSlots] backup has no open slots -> keep locked");
+              __raceWinnerReady = false;
+              showToast("no open slots (backup)", "limit");
+              return;
+            }
+          
             const url = __tpl.prefix + encodeURIComponent(bDate) + __tpl.suffix;
-  
+          
             __raceWinnerReady = true;
             onAnyGetAvailableSlots(url, bJson);
-  
+          
             __lastRandomDayText = bDate;
             if (__dateEl) __dateEl.value = bDate;
-  
+          
             const trigger = document.getElementById("__cal_date_trigger");
             const popup   = document.getElementById("__cal_days_popup");
             if (trigger) trigger.textContent = bDate;
@@ -1238,11 +1263,12 @@
                 btn.classList.toggle("cal-day-selected", dt === bDate);
               });
             }
-  
+          
             showToast(`slots loaded for ${bDate} (backup)`, "info");
             if (typeof onWinnerReady === "function") onWinnerReady(bDate);
             return;
           }
+
   
           continue;
         }
@@ -1307,22 +1333,22 @@
     }
   }
   
-  // نراقبو تغييرات لوكال (storage event كيخدم ملي كتبدّل من نفس الصفحة؟ لا)
-  // لذلك كنزيدو polling خفيف
   function startSamuraiTimesWatcher() {
+    if (window.__cal_samurai_times_watcher) return;
+    window.__cal_samurai_times_watcher = true;
+  
     let lastB = null, lastA = null;
   
-    const tick = () => {
+    setInterval(() => {
       const { before, after } = readSamuraiTimes();
       if (before !== lastB || after !== lastA) {
         lastB = before;
         lastA = after;
         updateSamuraiTimesBox();
       }
-      requestAnimationFrame(tick);
-    };
-    tick();
+    }, 250);
   }
+
   // =======================================================
   // BOOT
   // =======================================================
@@ -1363,6 +1389,7 @@
   boot();
 
 })();
+
 
 
 
