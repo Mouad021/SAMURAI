@@ -378,16 +378,16 @@
 
   function onSlotsResponse(json) {
     try {
+      const ddl = ensureDDL();
+      if (!ddl) return warn("Slot DDL not found");
+  
       const sig = signatureOf(json);
       if (sig && sig === STATE.lastRespSig) return;
       STATE.lastRespSig = sig;
-
+  
       const items = normalizeSlots(json);
       if (!items.length) return warn("Slots response empty after normalize.");
-
-      const ddl = ensureDDL();
-      if (!ddl) return warn("Slot DDL not found");
-
+  
       injectSlotsAndSelectBest(ddl, items);
     } catch (e) {
       warn("onSlotsResponse error", e);
@@ -469,6 +469,12 @@
     const hasDP = await waitFor(() => !!findRealDatePicker(), 20000, 120);
     if (!hasDP) return warn("Real DatePicker not found");
     const dpObj = findRealDatePicker();
+    try {
+      dpObj.dp.bind("change", () => {
+        log("Date changed manually -> reset signature");
+        STATE.lastRespSig = "";
+      });
+    } catch {}
 
     await waitFor(() => !!findRealSlotDDL(), 20000, 120);
     const o = findRealSlotDDL();
@@ -483,3 +489,4 @@
     if (!setDateWithKendo(dpObj.dp, dpObj.inp, STATE.pickedDay)) return;
   })().catch(e => warn("Fatal", e));
 })();
+
