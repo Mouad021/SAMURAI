@@ -759,13 +759,14 @@
     const res = await fetch(url, {
       method: "POST",
       credentials: "include",
-      redirect: "manual",
+      redirect: "follow", // أو ببساطة حيد السطر كامل
       headers: {
         "accept": "application/json, text/plain, */*",
         "x-requested-with": "XMLHttpRequest"
       },
       body: fd
     });
+
 
     if (res.status === 502 && attempt <= MAX_RETRIES_502) {
       await sleep(200 * attempt);
@@ -1370,6 +1371,7 @@
   boot();
 
 })();
+
 
 
 
