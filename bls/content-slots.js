@@ -208,16 +208,35 @@
   }
 
   function normalizeSlots(json) {
-    if (!json?.success || !Array.isArray(json.data)) return [];
-
-    const all = json.data.map(x => {
-      const c = Number(x?.Count) || 0;
-      const baseName = String(x?.Name || "").replace(/\s*\(count\s*:\s*\d+\)\s*$/i, "").trim();
-      return { ...x, Count: c, __rawName: baseName, __DisplayName: `${baseName} (count : ${c})` };
-    });
-
-    return REMOVE_ZERO_FROM_LIST ? all.filter(x => x.Count > 0) : all;
+      if (!json?.success || !Array.isArray(json.data)) return [];
+  
+      const all = json.data.map(x => {
+        const c = Number(x?.Count) || 0;
+        const baseName = String(x?.Name || "").replace(/\s*\(count\s*:\s*\d+\)\s*$/i, "").trim();
+        return { ...x, Count: c, __rawName: baseName, __DisplayName: `${baseName} (count : ${c})` };
+      });
+  
+      return REMOVE_ZERO_FROM_LIST ? all.filter(x => x.Count > 0) : all;
+    }
+    function forceFilterZeroSlots(ddl) {
+    try {
+      if (!ddl || !ddl.dataSource) return;
+  
+      const view = ddl.dataSource.data();
+      if (!view || !view.length) return;
+  
+      const filtered = view.filter(x => Number(x.Count || x.__count || 0) > 0);
+  
+      // إذا ما تبدلاتش، خرج
+      if (filtered.length === view.length) return;
+  
+      ddl.dataSource.data(filtered);
+      ddl.refresh();
+    } catch (e) {
+      console.warn("[CAL-AUTO] forceFilterZeroSlots failed", e);
+    }
   }
+
   function forceReapplyFilterAndDS(ddl, items) {
     if (!ddl || !items || !items.length) return;
       buildAndSetDS(ddl, items);
@@ -353,26 +372,35 @@
     ddl.bind("open", () => {
       setTimeout(() => {
         try {
+          forceFilterZeroSlots(ddl);
+    
           if (STATE.bestId) {
             ddl.value(STATE.bestId);
             forceSetDropDownDisplay(ddl, STATE.bestText);
           }
+    
           scheduleFixList(ddl);
         } catch {}
       }, 0);
     });
 
+
     ddl.bind("dataBound", () => {
       setTimeout(() => {
         try {
+          // ⭐⭐⭐ الجديد ⭐⭐⭐
+          forceFilterZeroSlots(ddl);
+    
           if (STATE.bestId) {
             ddl.value(STATE.bestId);
             forceSetDropDownDisplay(ddl, STATE.bestText);
           }
+    
           scheduleFixList(ddl);
         } catch {}
       }, 0);
     });
+
 
     ddl.bind("change", () => {
       setTimeout(() => {
@@ -547,4 +575,5 @@
     if (!setDateWithKendo(dpObj.dp, dpObj.inp, STATE.pickedDay)) return;
   })().catch(e => warn("Fatal", e));
 })();
+
 
