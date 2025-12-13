@@ -28,8 +28,9 @@
     interceptorInstalled: false,
     ajaxHookInstalled: false,
     patchApplied: false,
-    lastRespSig: "",
-    refreshScheduled: false
+    lastRespKey: "",          // ✅ بدل lastRespSig -> key = url + sig
+    refreshScheduled: false,
+    lastDDLWrapEl: null       // ✅ باش نعرفو واش تبدّل instance
   };
 
   function scheduleOnce(fn) {
@@ -39,6 +40,18 @@
       STATE.refreshScheduled = false;
       try { fn(); } catch {}
     });
+  }
+
+  // ✅ Patch صغير يمنع error: slot.enable is not a function (بدون تغيير فالموقع)
+  function patchSlotEnableNoop() {
+    try {
+      // بعض المواقع كيعتمدو على global اسمها slot
+      const s = window.slot;
+      if (s && typeof s === "object" && typeof s.enable !== "function") {
+        s.enable = function(){};
+        log("Patched window.slot.enable (noop) to avoid site error.");
+      }
+    } catch {}
   }
 
   function getAvailDays() {
@@ -132,15 +145,33 @@
 
   function ensureDDL() {
     try {
-      // إذا تبدّل instance/DOM: عاود لقاه
-      if (!STATE.ddl || !STATE.ddl.wrapper || !STATE.ddl.wrapper[0] || !document.contains(STATE.ddl.wrapper[0])) {
+      const needReacquire =
+        !STATE.ddl ||
+        !STATE.ddl.wrapper ||
+        !STATE.ddl.wrapper[0] ||
+        !document.contains(STATE.ddl.wrapper[0]);
+
+      if (needReacquire) {
         const o = findRealSlotDDL();
         if (o) {
           STATE.ddl = o.ddl;
           STATE.ddlInput = o.inp;
+
+          // ✅ بما أنه instance جديدة: عاود bind
+          STATE.handlersBound = false;
+          STATE.lastDDLWrapEl = STATE.ddl?.wrapper?.[0] || null;
+
           bindKeepSelectionHandlers(STATE.ddl);
           patchSiteOnSlotOpen();
           log("DDL re-acquired:", STATE.ddlInput?.id || STATE.ddlInput?.name || "(unknown)");
+        }
+      } else {
+        // ✅ حتى إلا باقية: إلى تبدّل wrapper (rare) عاود bind
+        const wrapEl = STATE.ddl?.wrapper?.[0] || null;
+        if (wrapEl && STATE.lastDDLWrapEl && wrapEl !== STATE.lastDDLWrapEl) {
+          STATE.handlersBound = false;
+          STATE.lastDDLWrapEl = wrapEl;
+          bindKeepSelectionHandlers(STATE.ddl);
         }
       }
     } catch {}
@@ -152,7 +183,7 @@
     const dateObj = new Date(Y, (M - 1), D);
 
     // ✅ مهم: ملي كتبدّل النهار، خليه يعاود يحقن من جديد
-    STATE.lastRespSig = "";
+    STATE.lastRespKey = "";
 
     try {
       dp.value(dateObj);
@@ -376,18 +407,24 @@
     }
   }
 
-  function onSlotsResponse(json) {
+  // ✅ key = url + sig (باش أي تاريخ جديد يعاود يطبق حتى لو نفس counts)
+  function makeRespKey(url, json) {
+    const sig = signatureOf(json);
+    return `${String(url || "")}__${sig}`;
+  }
+
+  function onSlotsResponse(json, urlHint = "") {
     try {
       const ddl = ensureDDL();
       if (!ddl) return warn("Slot DDL not found");
-  
-      const sig = signatureOf(json);
-      if (sig && sig === STATE.lastRespSig) return;
-      STATE.lastRespSig = sig;
-  
+
+      const key = makeRespKey(urlHint, json);
+      if (key && key === STATE.lastRespKey) return;
+      STATE.lastRespKey = key;
+
       const items = normalizeSlots(json);
       if (!items.length) return warn("Slots response empty after normalize.");
-  
+
       injectSlotsAndSelectBest(ddl, items);
     } catch (e) {
       warn("onSlotsResponse error", e);
@@ -415,7 +452,7 @@
 
             const txt = this.responseText || "";
             const json = JSON.parse(txt);
-            onSlotsResponse(json);
+            onSlotsResponse(json, url);
           } catch {}
         });
       } catch {}
@@ -423,7 +460,7 @@
     };
   }
 
-  // ✅ الجديد: hook ديال $.ajax باش ملي الموقع يكمّل success ديالو كنعاودو نطبّقو التعديلات
+  // ✅ hook ديال $.ajax باش ملي الموقع يكمّل success ديالو كنعاودو نطبّقو التعديلات
   function installAjaxHook() {
     if (STATE.ajaxHookInstalled) return;
     STATE.ajaxHookInstalled = true;
@@ -433,15 +470,19 @@
 
     const _ajax = $.ajax.bind($);
     $.ajax = function(settings) {
-      const url = (typeof settings === "string") ? settings : (settings && settings.url) ? settings.url : "";
+      const url = (typeof settings === "string")
+        ? settings
+        : (settings && settings.url) ? settings.url : "";
+
       const req = _ajax.apply(this, arguments);
 
       try {
         if (SLOTS_URL_RE.test(url) && req && typeof req.then === "function") {
-          req.then((data) => {
-            // ✅ بعد ما الموقع يكمل update ديالو
+          req.then(function() {
+            // jQuery then يمكن يرجع (data, textStatus, jqXHR)
+            const data = arguments && arguments.length ? arguments[0] : null;
             setTimeout(() => {
-              try { onSlotsResponse(data); } catch {}
+              try { if (data) onSlotsResponse(data, url); } catch {}
             }, 0);
           }).catch(() => {});
         }
@@ -456,6 +497,7 @@
   (async () => {
     if (!await waitForJqKendo()) return warn("jQuery/Kendo not ready (timeout)");
 
+    patchSlotEnableNoop();      // ✅ يمنع error slot.enable
     installXHRInterceptor();
     installAjaxHook();
 
@@ -469,10 +511,12 @@
     const hasDP = await waitFor(() => !!findRealDatePicker(), 20000, 120);
     if (!hasDP) return warn("Real DatePicker not found");
     const dpObj = findRealDatePicker();
+
+    // ✅ أي تغيير يدوي فالتاريخ: نخلي الحقن يعاود يخدم
     try {
       dpObj.dp.bind("change", () => {
-        log("Date changed manually -> reset signature");
-        STATE.lastRespSig = "";
+        log("Date changed manually -> reset key");
+        STATE.lastRespKey = "";
       });
     } catch {}
 
@@ -481,6 +525,8 @@
     if (o) {
       STATE.ddl = o.ddl;
       STATE.ddlInput = o.inp;
+      STATE.lastDDLWrapEl = STATE.ddl?.wrapper?.[0] || null;
+
       patchSiteOnSlotOpen();
       bindKeepSelectionHandlers(STATE.ddl);
       log("Slot DDL prepared:", STATE.ddlInput?.id || STATE.ddlInput?.name || "(unknown)");
@@ -489,4 +535,3 @@
     if (!setDateWithKendo(dpObj.dp, dpObj.inp, STATE.pickedDay)) return;
   })().catch(e => warn("Fatal", e));
 })();
-
