@@ -677,21 +677,21 @@
 
     if (!setDateWithKendo(dpObj.dp, dpObj.inp, STATE.pickedDay)) return;
     function safeSubmitOnce() {
-      if (__submitDone) return false;
+      if (__submitDone) return;
     
-      const f = getForm();
-      if (!f) return false;
-    
-      // الأفضل: click على زر submit باش يتفعلو handlers ديال الموقع (anti-forgery / validation)
-      const btn =
-        f.querySelector('button[type="submit"]') ||
-        f.querySelector('input[type="submit"]') ||
-        document.querySelector('button[type="submit"], input[type="submit"]');
+      const f = document.querySelector("form");
+      if (!f) return;
     
       __submitDone = true;
-      try { ensureSubmitCounter(); } catch {}
+    
+      ensureSubmitCounter();
       const c = document.getElementById("__cal_submit_counter");
       if (c) c.textContent = "🚀 SUBMIT";
+    
+      // 🔥 ضروري click باش يتفعلو anti-forgery handlers
+      const btn =
+        f.querySelector('button[type="submit"]') ||
+        f.querySelector('input[type="submit"]');
     
       if (btn) {
         btn.click();
@@ -700,13 +700,34 @@
       } else {
         f.submit();
       }
-      return true;
     }
 
+
     (function rafLoop(){
-      tryDelayedSubmit();
-      if (!__submitDone) requestAnimationFrame(rafLoop);
+      if (__submitDone) return;
+    
+      const now = performance.now();
+      const remain = (PAGE_T0 + TARGET_MS) - now;
+    
+      // ⏳ مازال الوقت
+      if (remain > 0) {
+        updateSubmitCounter(remain, false);
+        requestAnimationFrame(rafLoop);
+        return;
+      }
+    
+      // ⛔ الوقت سالا ولكن مازال ماكايناش slots أو tokens
+      if (!hasAvailableSlotNow() || !isDataReady()) {
+        updateSubmitCounter(0, true);
+        requestAnimationFrame(rafLoop);
+        return;
+      }
+    
+      // ✅ كلشي واجد → فوراً Submit
+      safeSubmitOnce();
+    
     })();
   })().catch(e => warn("Fatal", e));
 })();
+
 
