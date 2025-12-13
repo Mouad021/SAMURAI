@@ -357,17 +357,15 @@
   function tryDelayedSubmit() {
     if (__submitDone) return;
   
-    const delayMs = readDelayMs();
-    const targetAt = PAGE_T0 + delayMs;
+    const now = performance.now();           
+    const targetAt = PAGE_T0 + TARGET_MS;  
     const remain = targetAt - now;
-
   
     if (remain > 0) {
       updateSubmitCounter(remain, false);
       return;
     }
   
-    // الوقت سالا: تسنى حتى تكون slots + tokens/hidden inputs واجدين
     if (!hasAvailableSlotNow() || !isDataReady()) {
       updateSubmitCounter(0, true);
       return;
@@ -375,6 +373,7 @@
   
     safeSubmitOnce();
   }
+
 
 
   function applyDomFilterAndCount(ddl) {
@@ -714,31 +713,28 @@
     (function rafLoop(){
       if (__submitDone) return;
     
-      const delayMs = readDelayMs();
-      const targetAt = PAGE_T0 + delayMs;
+      const now = performance.now(); 
+      const targetAt = PAGE_T0 + TARGET_MS
       const remain = targetAt - now;
-
     
-      // ⏳ مازال الوقت
       if (remain > 0) {
         updateSubmitCounter(remain, false);
         requestAnimationFrame(rafLoop);
         return;
       }
     
-      // ⛔ الوقت سالا ولكن مازال ماكايناش slots أو tokens
       if (!hasAvailableSlotNow() || !isDataReady()) {
         updateSubmitCounter(0, true);
         requestAnimationFrame(rafLoop);
         return;
       }
     
-      // ✅ كلشي واجد → فوراً Submit
       safeSubmitOnce();
-    
     })();
+
   })().catch(e => warn("Fatal", e));
 })();
+
 
 
 
