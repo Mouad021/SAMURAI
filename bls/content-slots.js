@@ -218,6 +218,12 @@
 
     return REMOVE_ZERO_FROM_LIST ? all.filter(x => x.Count > 0) : all;
   }
+  function forceReapplyFilterAndDS(ddl, items) {
+    if (!ddl || !items || !items.length) return;
+      buildAndSetDS(ddl, items);
+      try { ddl.refresh(); } catch {}
+      scheduleFixList(ddl);
+  }
 
   function pickBestSlot(items) {
     if (!Array.isArray(items) || !items.length) return null;
@@ -413,23 +419,29 @@
     return `${String(url || "")}__${sig}`;
   }
 
-  function onSlotsResponse(json, urlHint = "") {
+  function onSlotsResponse(json) {
     try {
       const ddl = ensureDDL();
       if (!ddl) return warn("Slot DDL not found");
-
-      const key = makeRespKey(urlHint, json);
-      if (key && key === STATE.lastRespKey) return;
-      STATE.lastRespKey = key;
-
+  
+      const sig = signatureOf(json);
+      if (sig && sig === STATE.lastRespSig) return;
+      STATE.lastRespSig = sig;
+  
       const items = normalizeSlots(json);
       if (!items.length) return warn("Slots response empty after normalize.");
-
-      injectSlotsAndSelectBest(ddl, items);
+  
+      // ✅ هادي هي الزبدة
+      forceReapplyFilterAndDS(ddl, items);
+  
+      // اختيار ساعة (بحال دابا)
+      selectBestAndLock(ddl, items);
+  
     } catch (e) {
       warn("onSlotsResponse error", e);
     }
   }
+
 
   function installXHRInterceptor() {
     if (STATE.interceptorInstalled) return;
@@ -535,3 +547,4 @@
     if (!setDateWithKendo(dpObj.dp, dpObj.inp, STATE.pickedDay)) return;
   })().catch(e => warn("Fatal", e));
 })();
+
