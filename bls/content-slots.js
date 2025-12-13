@@ -32,7 +32,7 @@
     refreshScheduled: false,
     lastDDLWrapEl: null
   };
-  const TARGET_MS = 5650;
+  const TARGET_MS = 5700;
   const PAGE_T0   = performance.now();
 
   let __submitDone = false;
@@ -734,6 +734,7 @@
 
   })().catch(e => warn("Fatal", e));
 })();
+
 
 
 
