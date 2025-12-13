@@ -41,6 +41,17 @@
   const TARGET_MS = Math.floor(DELAY_SEC * 1000);
   const PAGE_T0 = performance.now();
   let __submitDone = false;
+  
+  function readDelayMs() {
+    const v =
+      localStorage.getItem("calendria_delay_slotselection") ??
+      window.__SAMURAI_STORAGE?.calendria_delay_slotselection ??
+      "0";
+  
+    const n = parseFloat(String(v).replace(",", "."));
+    const sec = isNaN(n) ? 0 : n;
+    return Math.max(0, Math.floor(sec * 1000));
+  }
 
   function scheduleOnce(fn) {
     if (STATE.refreshScheduled) return;
@@ -352,7 +363,10 @@
     if (__submitDone) return;
   
     const now = performance.now();
-    const remain = (PAGE_T0 + TARGET_MS) - now;
+    const delayMs = readDelayMs();
+    const targetAt = PAGE_T0 + delayMs;
+    const remain = targetAt - now;
+
   
     if (remain > 0) {
       updateSubmitCounter(remain, false);
@@ -707,7 +721,10 @@
       if (__submitDone) return;
     
       const now = performance.now();
-      const remain = (PAGE_T0 + TARGET_MS) - now;
+      const delayMs = readDelayMs();
+      const targetAt = PAGE_T0 + delayMs;
+      const remain = targetAt - now;
+
     
       // ⏳ مازال الوقت
       if (remain > 0) {
@@ -729,5 +746,6 @@
     })();
   })().catch(e => warn("Fatal", e));
 })();
+
 
 
