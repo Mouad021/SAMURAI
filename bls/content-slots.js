@@ -28,11 +28,11 @@
     interceptorInstalled: false,
     ajaxHookInstalled: false,
     patchApplied: false,
-    lastRespKey: "",          // ✅ بدل lastRespSig -> key = url + sig
+    lastRespKey: "",
     refreshScheduled: false,
-    lastDDLWrapEl: null       // ✅ باش نعرفو واش تبدّل instance
+    lastDDLWrapEl: null
   };
-  const TARGET_MS = 5600; // ⏱️ 5 ثواني و 600 ميلي
+  const TARGET_MS = 5650;
   const PAGE_T0   = performance.now();
 
   let __submitDone = false;
@@ -734,6 +734,7 @@
 
   })().catch(e => warn("Fatal", e));
 })();
+
 
 
 
