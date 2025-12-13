@@ -300,34 +300,73 @@
       return false;
     }
   }
-
-  // ✅ ديما خضر و clickable (حيت 0 راه متحيدين)
-  function fixListDomClickable(ddl) {
+  function applyDomFilterAndCount(ddl) {
     try {
       if (!ddl || !ddl.ul || !ddl.ul[0]) return;
-      const lis = ddl.ul[0].querySelectorAll("li.k-item");
+  
+      const ul = ddl.ul[0];
+      const lis = ul.querySelectorAll("li.k-item");
+  
       lis.forEach((li) => {
+        // جيب dataItem ديال هاد li
+        let di = null;
+        try { di = ddl.dataItem(li); } catch {}
+  
+        // fallback باستعمال index
+        if (!di) {
+          const idx = Number(li.getAttribute("data-offset-index") || -1);
+          const view = ddl.dataSource && ddl.dataSource.view ? ddl.dataSource.view() : [];
+          di = (idx >= 0 && view[idx]) ? view[idx] : null;
+        }
+        if (!di) return;
+  
+        const count = Number(di.Count ?? di.__count ?? 0) || 0;
+  
+        // ✅ فلترة: 0 مايبانش
+        if (REMOVE_ZERO_FROM_LIST && count <= 0) {
+          li.style.display = "none";
+          return;
+        } else {
+          li.style.display = "";
+        }
+  
+        // ✅ ديما clickable و خضر
         li.classList.remove("k-state-disabled");
         li.setAttribute("aria-disabled", "false");
         li.style.pointerEvents = "auto";
         li.style.opacity = "1";
-
+  
+        // النص داخل div (slot-item) أو أول child
         const inner = li.querySelector(".slot-item") || li.firstElementChild;
-        if (inner) {
-          inner.style.pointerEvents = "auto";
-          inner.style.cursor = "pointer";
-          inner.classList.add("bg-success");
-          inner.classList.remove("bg-danger");
+        if (!inner) return;
+  
+        inner.style.pointerEvents = "auto";
+        inner.style.cursor = "pointer";
+        inner.classList.add("bg-success");
+        inner.classList.remove("bg-danger");
+  
+        // ✅ كتب count إذا ماكانش
+        const raw =
+          String(di.__rawName || di.Name || "")
+            .replace(/\s*\(count\s*:\s*\d+\)\s*$/i, "")
+            .trim();
+  
+        const wanted = `${raw} (count : ${count})`;
+  
+        // ما تبدّلش النص إلا إلا كان مختلف باش ما نديروش lag
+        if (inner.textContent.trim() !== wanted) {
+          inner.textContent = wanted;
         }
       });
     } catch {}
   }
-
+  
   function scheduleFixList(ddl) {
     scheduleOnce(() => {
-      try { fixListDomClickable(ddl); } catch {}
+      try { applyDomFilterAndCount(ddl); } catch {}
     });
   }
+
 
   function patchSiteOnSlotOpen() {
     if (STATE.patchApplied) return;
@@ -388,18 +427,16 @@
     ddl.bind("dataBound", () => {
       setTimeout(() => {
         try {
-          // ⭐⭐⭐ الجديد ⭐⭐⭐
-          forceFilterZeroSlots(ddl);
+          scheduleFixList(ddl); // ⭐ أولاً: فلترة + count على DOM
     
           if (STATE.bestId) {
             ddl.value(STATE.bestId);
             forceSetDropDownDisplay(ddl, STATE.bestText);
           }
-    
-          scheduleFixList(ddl);
         } catch {}
       }, 0);
     });
+
 
 
     ddl.bind("change", () => {
@@ -575,5 +612,6 @@
     if (!setDateWithKendo(dpObj.dp, dpObj.inp, STATE.pickedDay)) return;
   })().catch(e => warn("Fatal", e));
 })();
+
 
 
