@@ -321,7 +321,16 @@
       return data.some(x => Number(x.Count) > 0);
     } catch { return false; }
   }
-  
+  function isDataReady() {
+    try {
+      const f = getForm();
+      if (!f) return false;
+      const inputs = Array.from(f.querySelectorAll('input[type="hidden"], input[name]'));
+      return inputs.some(i => (i.value || "").length > 80);
+    } catch { return false; }
+  }
+
+
   function ensureSubmitCounter() {
     if (document.getElementById("__cal_submit_counter")) return;
     const el = document.createElement("div");
@@ -553,8 +562,8 @@
       if (!ddl) return warn("Slot DDL not found");
   
       const sig = signatureOf(json);
-      if (sig && sig === STATE.lastRespSig) return;
-      STATE.lastRespSig = sig;
+      if (sig && sig === STATE.lastRespKey) return;
+      STATE.lastRespKey = sig;
   
       const items = normalizeSlots(json);
       if (!items.length) return warn("Slots response empty after normalize.");
@@ -675,13 +684,22 @@
     if (!setDateWithKendo(dpObj.dp, dpObj.inp, STATE.pickedDay)) return;
     // ✅ Start counter + delayed submit loop
     (function rafLoop(){
-      tryDelayedSubmit();
+      const now = performance.now();
+      const remain = (PAGE_T0 + TARGET_MS) - now;
+    
+      if (remain > 0) {
+        updateSubmitCounter(remain, false);
+      } else {
+        // الوقت سالا: تسنى حتى تكون البيانات + slots
+        if (!hasAvailableSlotNow() || !isDataReady()) {
+          updateSubmitCounter(0, true);
+        } else {
+          ensureSubmitCounter();
+          document.getElementById("__cal_submit_counter").textContent = "✅ READY (click Submit)";
+        }
+      }
+    
       requestAnimationFrame(rafLoop);
     })();
-
   })().catch(e => warn("Fatal", e));
 })();
-
-
-
-
