@@ -32,6 +32,15 @@
     refreshScheduled: false,
     lastDDLWrapEl: null       // ✅ باش نعرفو واش تبدّل instance
   };
+  // ====== DELAY + SUBMIT STATE ======
+  const DELAY_SEC = (() => {
+    const v = localStorage.getItem("calendria_delay_slotselection") || window.__SAMURAI_STORAGE?.calendria_delay_slotselection || "0";
+    const n = parseFloat(String(v).replace(",", "."));
+    return isNaN(n) ? 0 : n;
+  })();
+  const TARGET_MS = Math.floor(DELAY_SEC * 1000);
+  const PAGE_T0 = performance.now();
+  let __submitDone = false;
 
   function scheduleOnce(fn) {
     if (STATE.refreshScheduled) return;
@@ -300,6 +309,60 @@
       return false;
     }
   }
+  function getForm() {
+    return document.querySelector("form");
+  }
+  
+  function hasAvailableSlotNow() {
+    try {
+      const ddl = ensureDDL();
+      if (!ddl || !ddl.dataSource) return false;
+      const data = ddl.dataSource.view ? ddl.dataSource.view() : [];
+      return data.some(x => Number(x.Count) > 0);
+    } catch { return false; }
+  }
+  
+  function ensureSubmitCounter() {
+    if (document.getElementById("__cal_submit_counter")) return;
+    const el = document.createElement("div");
+    el.id = "__cal_submit_counter";
+    el.style.cssText = "position:fixed;bottom:90px;right:20px;z-index:99999;background:#111;color:#0f0;font-family:monospace;font-size:13px;padding:6px 10px;border-radius:6px;box-shadow:0 0 10px rgba(0,0,0,.4);";
+    el.textContent = "⏳ 0.000s";
+    document.body.appendChild(el);
+  }
+  
+  function updateSubmitCounter(remainMs, waiting=false) {
+    ensureSubmitCounter();
+    const el = document.getElementById("__cal_submit_counter");
+    const s = Math.floor(Math.max(0, remainMs) / 1000);
+    const ms = Math.floor(Math.max(0, remainMs) % 1000);
+    el.textContent = waiting ? "⏳ waiting slot..." : `⏳ ${s}.${String(ms).padStart(3,"0")}s`;
+  }
+  
+  function tryDelayedSubmit() {
+    if (__submitDone) return;
+  
+    const now = performance.now();
+    const remain = (PAGE_T0 + TARGET_MS) - now;
+  
+    if (remain > 0) {
+      updateSubmitCounter(remain, false);
+      return;
+    }
+  
+    // الوقت وصل: ما نرسلش حتى يكون slot متاح
+    if (!hasAvailableSlotNow()) {
+      updateSubmitCounter(0, true);
+      return;
+    }
+  
+    __submitDone = true;
+    ensureSubmitCounter();
+    document.getElementById("__cal_submit_counter").textContent = "🚀 SUBMIT";
+    const f = getForm();
+    if (f) f.submit();
+  }
+
   function applyDomFilterAndCount(ddl) {
     try {
       if (!ddl || !ddl.ul || !ddl.ul[0]) return;
@@ -610,8 +673,15 @@
     }
 
     if (!setDateWithKendo(dpObj.dp, dpObj.inp, STATE.pickedDay)) return;
+    // ✅ Start counter + delayed submit loop
+    (function rafLoop(){
+      tryDelayedSubmit();
+      requestAnimationFrame(rafLoop);
+    })();
+
   })().catch(e => warn("Fatal", e));
 })();
+
 
 
 
