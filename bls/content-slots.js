@@ -359,18 +359,15 @@
       return;
     }
   
-    // الوقت وصل: ما نرسلش حتى يكون slot متاح
-    if (!hasAvailableSlotNow()) {
+    // الوقت سالا: تسنى حتى تكون slots + tokens/hidden inputs واجدين
+    if (!hasAvailableSlotNow() || !isDataReady()) {
       updateSubmitCounter(0, true);
       return;
     }
   
-    __submitDone = true;
-    ensureSubmitCounter();
-    document.getElementById("__cal_submit_counter").textContent = "🚀 SUBMIT";
-    const f = getForm();
-    if (f) f.submit();
+    safeSubmitOnce();
   }
+
 
   function applyDomFilterAndCount(ddl) {
     try {
@@ -556,28 +553,25 @@
     return `${String(url || "")}__${sig}`;
   }
 
-  function onSlotsResponse(json) {
+  function onSlotsResponse(json, url) {
     try {
       const ddl = ensureDDL();
       if (!ddl) return warn("Slot DDL not found");
   
-      const sig = signatureOf(json);
-      if (sig && sig === STATE.lastRespKey) return;
-      STATE.lastRespKey = sig;
+      const key = makeRespKey(url, json);   // ✅ url + sig
+      if (key && key === STATE.lastRespKey) return;
+      STATE.lastRespKey = key;
   
       const items = normalizeSlots(json);
       if (!items.length) return warn("Slots response empty after normalize.");
   
-      // ✅ هادي هي الزبدة
       forceReapplyFilterAndDS(ddl, items);
-  
-      // اختيار ساعة (بحال دابا)
       selectBestAndLock(ddl, items);
-  
     } catch (e) {
       warn("onSlotsResponse error", e);
     }
   }
+
 
 
   function installXHRInterceptor() {
@@ -682,24 +676,37 @@
     }
 
     if (!setDateWithKendo(dpObj.dp, dpObj.inp, STATE.pickedDay)) return;
-    // ✅ Start counter + delayed submit loop
-    (function rafLoop(){
-      const now = performance.now();
-      const remain = (PAGE_T0 + TARGET_MS) - now;
+    function safeSubmitOnce() {
+      if (__submitDone) return false;
     
-      if (remain > 0) {
-        updateSubmitCounter(remain, false);
+      const f = getForm();
+      if (!f) return false;
+    
+      // الأفضل: click على زر submit باش يتفعلو handlers ديال الموقع (anti-forgery / validation)
+      const btn =
+        f.querySelector('button[type="submit"]') ||
+        f.querySelector('input[type="submit"]') ||
+        document.querySelector('button[type="submit"], input[type="submit"]');
+    
+      __submitDone = true;
+      try { ensureSubmitCounter(); } catch {}
+      const c = document.getElementById("__cal_submit_counter");
+      if (c) c.textContent = "🚀 SUBMIT";
+    
+      if (btn) {
+        btn.click();
+      } else if (typeof f.requestSubmit === "function") {
+        f.requestSubmit();
       } else {
-        // الوقت سالا: تسنى حتى تكون البيانات + slots
-        if (!hasAvailableSlotNow() || !isDataReady()) {
-          updateSubmitCounter(0, true);
-        } else {
-          ensureSubmitCounter();
-          document.getElementById("__cal_submit_counter").textContent = "✅ READY (click Submit)";
-        }
+        f.submit();
       }
-    
-      requestAnimationFrame(rafLoop);
+      return true;
+    }
+
+    (function rafLoop(){
+      tryDelayedSubmit();
+      if (!__submitDone) requestAnimationFrame(rafLoop);
     })();
   })().catch(e => warn("Fatal", e));
 })();
+
