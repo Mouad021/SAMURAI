@@ -32,14 +32,9 @@
     refreshScheduled: false,
     lastDDLWrapEl: null       // ✅ باش نعرفو واش تبدّل instance
   };
-  // ====== DELAY + SUBMIT STATE ======
-  const DELAY_SEC = (() => {
-    const v = localStorage.getItem("calendria_delay_slotselection") || window.__SAMURAI_STORAGE?.calendria_delay_slotselection || "0";
-    const n = parseFloat(String(v).replace(",", "."));
-    return isNaN(n) ? 0 : n;
-  })();
-  const TARGET_MS = Math.floor(DELAY_SEC * 1000);
-  const PAGE_T0 = performance.now();
+  const TARGET_MS = 5600; // ⏱️ 5 ثواني و 600 ميلي
+  const PAGE_T0   = performance.now();
+
   let __submitDone = false;
   
   function readDelayMs() {
@@ -362,7 +357,6 @@
   function tryDelayedSubmit() {
     if (__submitDone) return;
   
-    const now = performance.now();
     const delayMs = readDelayMs();
     const targetAt = PAGE_T0 + delayMs;
     const remain = targetAt - now;
@@ -720,7 +714,6 @@
     (function rafLoop(){
       if (__submitDone) return;
     
-      const now = performance.now();
       const delayMs = readDelayMs();
       const targetAt = PAGE_T0 + delayMs;
       const remain = targetAt - now;
@@ -746,6 +739,7 @@
     })();
   })().catch(e => warn("Fatal", e));
 })();
+
 
 
 
